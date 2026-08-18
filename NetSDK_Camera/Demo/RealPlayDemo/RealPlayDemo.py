@@ -55,7 +55,7 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
         self._snap_serial = 0
         self.cosmos_url = os.getenv('COSMOS_LIVE_URL', 'http://127.0.0.1:8765/analyze')
         self.cosmos_interval_seconds = _positive_float_from_env('COSMOS_SAMPLE_INTERVAL_SECONDS', 10)
-        self.cosmos_stop_on_exit = os.getenv('COSMOS_STOP_ON_EXIT', '').strip().lower() in {'1', 'true', 'yes'}
+        self.cosmos_stop_on_exit = os.getenv('COSMOS_STOP_ON_LIVE_CLOSE', '').strip().lower() in {'1', 'true', 'yes'}
         self._init_ui()
 
     def _init_ui(self):

@@ -14,6 +14,9 @@ import threading
 import platform
 import importlib
 import json
+import subprocess
+import urllib.request
+from urllib.parse import urlparse
 from dataclasses import dataclass
 from http.server import HTTPServer, SimpleHTTPRequestHandler
 from typing import List, Optional
@@ -180,6 +183,8 @@ class Launcher(QMainWindow):
         self._active_window      = None
         self._active_module_path = ""
         self._demo_close_cb      = None
+        self._cosmos_url = os.getenv("COSMOS_LIVE_URL", "http://127.0.0.1:8765/analyze")
+        self._cosmos_started_by_launcher = False
 
         # ── WebView ──────────────────────────────────────────────────
         self._view = QWebEngineView()
@@ -202,6 +207,70 @@ class Launcher(QMainWindow):
 
         self._view.load(QUrl(f"http://127.0.0.1:{port}/ui/"))
         self._view.loadFinished.connect(self._on_load_finished)
+        threading.Thread(target=self._ensure_cosmos_running, daemon=True, name="cosmos-starter").start()
+
+    def _cosmos_base_url(self):
+        return self._cosmos_url.rsplit("/", 1)[0]
+
+    def _cosmos_is_local(self):
+        return urlparse(self._cosmos_url).hostname in {"127.0.0.1", "localhost", "::1"}
+
+    def _cosmos_is_responding(self):
+        try:
+            with urllib.request.urlopen(self._cosmos_base_url() + "/health", timeout=1):
+                return True
+        except Exception:
+            return False
+
+    @staticmethod
+    def _detect_wsl_distro():
+        configured = os.getenv("COSMOS_WSL_DISTRO", "").strip()
+        if configured:
+            return configured
+        try:
+            result = subprocess.run(
+                ["wsl.exe", "-l", "-q"], capture_output=True, text=True, timeout=5, check=False
+            )
+            distros = [name.strip() for name in result.stdout.splitlines() if name.strip()]
+            return next((name for name in distros if not name.lower().startswith("docker-")), None)
+        except Exception:
+            return None
+
+    def _ensure_cosmos_running(self):
+        # Auto-start only applies to a local WSL deployment.  A remote URL is
+        # intentionally left under the remote server operator's control.
+        if os.getenv("COSMOS_AUTOSTART", "1").strip().lower() in {"0", "false", "no"}:
+            return
+        if not self._cosmos_is_local() or self._cosmos_is_responding():
+            return
+        distro = self._detect_wsl_distro()
+        if not distro:
+            return
+        project_dir = os.getenv("COSMOS_WSL_PROJECT_DIR", "~/CameraDNC/cosmos_code_base")
+        command = (
+            "cd " + project_dir + " && source .venv/bin/activate && "
+            "nohup env VLLM_USE_FLASHINFER_SAMPLER=0 python live_service.py "
+            "--host 0.0.0.0 --port 8765 --gpu-memory-utilization 0.55 "
+            "--max-model-len 2048 --max-new-tokens 128 --max-image-side 960 "
+            "--allow-shutdown </dev/null > cosmos.log 2>&1 &"
+        )
+        try:
+            result = subprocess.run(
+                ["wsl.exe", "-d", distro, "--", "bash", "-lc", command],
+                capture_output=True, text=True, timeout=15, check=False,
+            )
+            self._cosmos_started_by_launcher = result.returncode == 0
+        except Exception:
+            self._cosmos_started_by_launcher = False
+
+    def _shutdown_managed_cosmos(self):
+        if not self._cosmos_started_by_launcher:
+            return
+        try:
+            req = urllib.request.Request(self._cosmos_base_url() + "/shutdown", data=b"", method="POST")
+            urllib.request.urlopen(req, timeout=2).close()
+        except Exception:
+            pass
 
     # ── Load finished ────────────────────────────────────────────────
     def _on_load_finished(self, ok: bool):
@@ -328,6 +397,7 @@ class Launcher(QMainWindow):
                 self._active_window.close()
             except Exception:
                 pass
+        self._shutdown_managed_cosmos()
         event.accept()
 
 
