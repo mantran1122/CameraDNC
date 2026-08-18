@@ -148,14 +148,22 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
         try:
             req = urlrequest.Request(self.cosmos_url, data=image_bytes,
                                      headers={'Content-Type': 'application/octet-stream'}, method='POST')
-            with urlrequest.urlopen(req, timeout=15) as response:
+            # First inference can include CUDA graph warm-up and take longer
+            # than a normal frame.  Do not abandon it after 15 seconds: an
+            # abandoned request keeps the service busy and causes 429s for
+            # subsequent snapshots.
+            timeout_seconds = float(os.getenv('COSMOS_TIMEOUT_SECONDS', '90'))
+            with urlrequest.urlopen(req, timeout=timeout_seconds) as response:
                 payload = json.loads(response.read().decode('utf-8'))
             result = payload.get('result', {})
             self.cosmos_result.emit('{} | {} | {} ms'.format(
                 result.get('risk_level', 'none').upper(), result.get('summary', 'Không có mô tả'),
                 payload.get('inference_ms', '?')))
         except HTTPError as exc:
-            self.cosmos_status.emit('Cosmos: {} {}'.format(exc.code, exc.read().decode('utf-8', 'replace')[:100]))
+            if exc.code == 429:
+                self.cosmos_status.emit('Cosmos: đang phân tích khung hình trước...')
+            else:
+                self.cosmos_status.emit('Cosmos: {} {}'.format(exc.code, exc.read().decode('utf-8', 'replace')[:100]))
         except (URLError, TimeoutError, ValueError) as exc:
             self.cosmos_status.emit('Cosmos: không kết nối được ({})'.format(exc))
         except Exception as exc:
