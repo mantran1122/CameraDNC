@@ -220,7 +220,10 @@ class NetClient(metaclass=Singleton):
             try:
                 return error_code[errcode]
             except KeyError:
-                return 'There is no such error code'
+                # Newer SDK releases can return codes not present in the
+                # bundled enum table.  Keep the numeric value visible so a
+                # failed operation can be diagnosed instead of hiding it.
+                return 'Dahua SDK error code: {}'.format(errcode)
         else:
             return 'Unknown mistake'
 
