@@ -138,15 +138,23 @@ def _load_model() -> None:
         )
 
         try:
+            # vLLM 0.23+ renamed guided_json to structured_outputs.  Use the
+            # current API so the model is constrained to the response schema.
+            from vllm.sampling_params import StructuredOutputsParams
+
             _sampling_params = SamplingParams(
                 temperature=0.0,
                 max_tokens=max_new_tokens,
-                guided_json=_LIVE_SCHEMA,
+                structured_outputs=StructuredOutputsParams(json=_LIVE_SCHEMA),
             )
-        except TypeError:
-            # vllm version cũ không có guided_json — fallback không có constraint
-            logger.warning("guided_json không được hỗ trợ bởi vllm version này, chạy không có JSON constraint.")
-            _sampling_params = SamplingParams(temperature=0.0, max_tokens=max_new_tokens)
+            logger.info("JSON structured output enabled.")
+        except (ImportError, TypeError) as exc:
+            # Keep compatibility with older vLLM releases, although those
+            # releases cannot guarantee a parseable JSON response.
+            logger.warning("JSON structured output unavailable: %s", exc)
+            _sampling_params = SamplingParams(
+                temperature=0.0, max_tokens=max_new_tokens
+            )
 
         _set_status("ready")
         logger.info("Model ready.")
