@@ -20,6 +20,13 @@ from NetSDK.SDK_Struct import C_LLONG, SNAP_PARAMS, NET_IN_LOGIN_WITH_HIGHLEVEL_
 from connection_preferences import clear_connection, load_connection, save_connection
 
 
+def _positive_float_from_env(name, default):
+    try:
+        return max(float(os.getenv(name, str(default))), 1.0)
+    except ValueError:
+        return float(default)
+
+
 class MyMainWindow(QMainWindow, Ui_MainWindow):
     """Connect to one Dahua recorder and render a selected channel."""
 
@@ -47,6 +54,8 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
         self._ai_enabled = False
         self._snap_serial = 0
         self.cosmos_url = os.getenv('COSMOS_LIVE_URL', 'http://127.0.0.1:8765/analyze')
+        self.cosmos_interval_seconds = _positive_float_from_env('COSMOS_SAMPLE_INTERVAL_SECONDS', 10)
+        self.cosmos_stop_on_exit = os.getenv('COSMOS_STOP_ON_EXIT', '').strip().lower() in {'1', 'true', 'yes'}
         self._init_ui()
 
     def _init_ui(self):
@@ -65,7 +74,7 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
         self.remember_check.setGeometry(10, 445, 260, 24)
         self.remember_check.setChecked(connection['remember'])
         self.remember_check.toggled.connect(self._on_remember_toggled)
-        self.ai_check = QCheckBox('Phân tích Cosmos (mỗi 3 giây)', self.centralwidget)
+        self.ai_check = QCheckBox('Phân tích Cosmos (mỗi {} giây)'.format(int(self.cosmos_interval_seconds)), self.centralwidget)
         self.ai_check.setGeometry(270, 445, 220, 24)
         self.ai_check.setEnabled(False)
         self.ai_check.toggled.connect(self._on_ai_toggled)
@@ -83,7 +92,7 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
         self.login_btn.clicked.connect(self.login_btn_onclick)
         self.play_btn.clicked.connect(self.play_btn_onclick)
         self.sample_timer = QTimer(self)
-        self.sample_timer.setInterval(3000)
+        self.sample_timer.setInterval(int(self.cosmos_interval_seconds * 1000))
         self.sample_timer.timeout.connect(self._request_snapshot)
 
     def _on_remember_toggled(self, checked):
@@ -176,6 +185,18 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
 
     def _show_cosmos_status(self, text):
         self.cosmos_label.setText(text)
+
+    def _shutdown_cosmos_if_enabled(self):
+        if not self.cosmos_stop_on_exit:
+            return
+        shutdown_url = self.cosmos_url.rsplit('/', 1)[0] + '/shutdown'
+        try:
+            req = urlrequest.Request(shutdown_url, data=b'', method='POST')
+            urlrequest.urlopen(req, timeout=2).close()
+        except Exception:
+            # Closing the camera UI must never be delayed by a stopped or
+            # remote Cosmos service.
+            pass
 
     def _is_logged_in(self):
         return bool(getattr(self.loginID, 'value', self.loginID))
@@ -291,6 +312,7 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
         if self._is_logged_in():
             self.sdk.Logout(self.loginID)
         self.sdk.Cleanup()
+        self._shutdown_cosmos_if_enabled()
         event.accept()
 
 

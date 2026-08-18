@@ -12,13 +12,15 @@ import argparse
 import io
 import json
 import logging
+import os
+import signal
 import threading
 import time
 from contextlib import asynccontextmanager
 from datetime import datetime
 
 import uvicorn
-from fastapi import Body, FastAPI
+from fastapi import Body, FastAPI, Request
 from fastapi.responses import JSONResponse
 from PIL import Image
 
@@ -203,6 +205,17 @@ def _run_inference(image: Image.Image) -> str:
     return output_text.strip()
 
 
+def _resize_for_live_inference(image: Image.Image) -> Image.Image:
+    """Keep VLM visual tokens bounded for responsive live-camera inference."""
+    max_side = _cfg["max_image_side"]
+    if max(image.size) <= max_side:
+        return image
+    resized = image.copy()
+    resized.thumbnail((max_side, max_side), Image.Resampling.LANCZOS)
+    logger.debug("Live frame resized from %s to %s", image.size, resized.size)
+    return resized
+
+
 # ── FastAPI app ────────────────────────────────────────────────────────────────
 
 @asynccontextmanager
@@ -221,6 +234,20 @@ async def health():
     if status == "error":
         return JSONResponse({"status": "error", "detail": detail})
     return {"status": status}
+
+
+@app.post("/shutdown")
+def shutdown(request: Request):
+    """Opt-in, loopback-only shutdown used by the local Windows camera app."""
+    if not _cfg.get("allow_shutdown"):
+        return JSONResponse({"status": "error", "detail": "shutdown disabled"}, status_code=403)
+    client_host = request.client.host if request.client else ""
+    if client_host not in {"127.0.0.1", "::1"}:
+        return JSONResponse({"status": "error", "detail": "loopback only"}, status_code=403)
+
+    logger.info("Local camera application requested Cosmos shutdown.")
+    threading.Timer(0.25, lambda: os.kill(os.getpid(), signal.SIGTERM)).start()
+    return {"status": "shutting_down"}
 
 
 @app.post("/analyze")
@@ -246,6 +273,7 @@ def analyze(body: bytes = Body(..., media_type="application/octet-stream")):
 
         try:
             image = Image.open(io.BytesIO(body)).convert("RGB")
+            image = _resize_for_live_inference(image)
         except Exception as exc:
             return JSONResponse(
                 {"status": "error", "detail": f"invalid image: {exc}"},
@@ -295,21 +323,29 @@ def main() -> None:
     parser.add_argument(
         "--gpu-memory-utilization",
         type=float,
-        default=0.85,
+        default=0.55,
         metavar="FLOAT",
         help="Phần VRAM dành cho vllm, ví dụ 0.85 (default: 0.85 — benchmark để chốt)",
     )
     parser.add_argument(
         "--max-model-len",
         type=int,
-        default=8192,
+        default=2048,
         help="Max context length (default: 8192 — đủ cho 1 frame)",
     )
     parser.add_argument(
         "--max-new-tokens",
         type=int,
-        default=512,
+        default=128,
         help="Max tokens model sinh ra (default: 512)",
+    )
+    parser.add_argument(
+        "--max-image-side", type=int, default=960, metavar="PIXELS",
+        help="Resize live frames so their longest side is at most this value (default: 960)",
+    )
+    parser.add_argument(
+        "--allow-shutdown", action="store_true",
+        help="Allow a loopback camera app to stop this service via POST /shutdown.",
     )
     parser.add_argument("--hf-token", default=None, metavar="TOKEN",
                         help="HuggingFace access token cho gated model (hf_xxx...)")
@@ -334,6 +370,8 @@ def main() -> None:
             "gpu_memory_utilization": args.gpu_memory_utilization,
             "max_model_len": args.max_model_len,
             "max_new_tokens": args.max_new_tokens,
+            "max_image_side": args.max_image_side,
+            "allow_shutdown": args.allow_shutdown,
         }
     )
 
