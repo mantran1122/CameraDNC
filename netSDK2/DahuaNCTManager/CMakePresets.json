@@ -1,0 +1,51 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 23,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "mingw-debug",
+      "displayName": "MinGW Debug",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/codex-check",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_CXX_COMPILER": "C:/Qt/Tools/mingw1310_64/bin/g++.exe",
+        "CMAKE_MAKE_PROGRAM": "C:/Users/Administrator/AppData/Local/Programs/Python/Python312/Scripts/ninja.exe",
+        "Qt6_DIR": "C:/Qt/6.11.1/mingw_64/lib/cmake/Qt6",
+        "DAHUA_SDK_ROOT": "D:/dnc/netSDK2",
+        "QT_DEPLOY_EXECUTABLE": "C:/Qt/6.11.1/mingw_64/bin/windeployqt.exe"
+      }
+    },
+    {
+      "name": "msvc2022-debug",
+      "displayName": "MSVC 2022 Debug",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/codex-msvc",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_C_COMPILER": "cl.exe",
+        "CMAKE_CXX_COMPILER": "cl.exe",
+        "CMAKE_MAKE_PROGRAM": "C:/Users/Administrator/AppData/Local/Programs/Python/Python312/Scripts/ninja.exe",
+        "Qt6_DIR": "C:/Qt/6.11.1/msvc2022_64/lib/cmake/Qt6",
+        "DAHUA_SDK_ROOT": "D:/dnc/netSDK2",
+        "QT_DEPLOY_EXECUTABLE": "C:/Qt/6.11.1/msvc2022_64/bin/windeployqt.exe"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "build-mingw-debug",
+      "displayName": "Build MinGW Debug",
+      "configurePreset": "mingw-debug"
+    },
+    {
+      "name": "build-msvc2022-debug",
+      "displayName": "Build MSVC 2022 Debug",
+      "configurePreset": "msvc2022-debug"
+    }
+  ]
+}

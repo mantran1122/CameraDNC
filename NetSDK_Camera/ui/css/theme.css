@@ -1,0 +1,116 @@
+/* ══════════════════════════════════════════════════════════════════
+   THEME — CSS custom properties
+   Dark (default) + Light (html[data-theme="light"])
+   Gia tri mau dong bo voi theme.py / AGENT.md
+══════════════════════════════════════════════════════════════════ */
+
+/* ── Dark theme (default) ───────────────────────────────────────── */
+:root {
+  /* surfaces */
+  --bg:     #1C1C1C;
+  --s1:     #1F1F1F;
+  --s2:     #2B2B2B;
+  --s3:     #323232;
+  --s4:     #3A3A3A;
+  --topbar: #1C1C1C;
+
+  /* borders */
+  --bd:  #3D3D3D;
+  --bd2: #4D4D4D;
+  --bd3: #606060;
+
+  /* text */
+  --p1: #FFFFFF;
+  --p2: #B0B0B0;
+  --p3: #767676;
+
+  /* status */
+  --accent: #0078D4;
+  --green:  #10B981;
+  --amber:  #F59E0B;
+  --red:    #EF4444;
+  --slate:  #767676;
+
+  /* card */
+  --card-shadow:       none;
+  --card-shadow-hover: none;
+  --card-error-bg:     #2B1A1A;
+
+  /* typography */
+  --font: 'Segoe UI', Arial, sans-serif;
+  --mono: 'Courier New', monospace;
+
+  /* radii */
+  --r-card: 4px;
+  --r-btn:  2px;
+  --r-chip: 2px;
+
+  /* sidebar */
+  --sb-bg:         #1A1A1A;
+  --sb-s1:         #1F1F1F;
+  --sb-s2:         #2B2B2B;
+  --sb-s3:         #323232;
+  --sb-bd:         #3D3D3D;
+  --sb-bd2:        #4D4D4D;
+  --sb-bd3:        #606060;
+  --sb-p1:         #FFFFFF;
+  --sb-p2:         #B0B0B0;
+  --sb-p3:         #767676;
+  --sb-accent:     #0078D4;
+  --sb-accent-bg:  rgba(0, 120, 212, 0.14);
+  --sb-accent-bd:  rgba(0, 120, 212, 0.28);
+  --sb-active-bg:  rgba(0, 120, 212, 0.18);
+  --sb-active-fg:  #FFFFFF;
+  --sb-tip-bg:     #2B2B2B;
+  --sb-tip-fg:     #FFFFFF;
+  --sb-shadow:     0 8px 24px rgba(0,0,0,.50);
+  --sb-red:        #EF4444;
+  --sb-w-open:     232px;
+  --sb-w-shut:     64px;
+}
+
+/* ── Light theme ────────────────────────────────────────────────── */
+html[data-theme="light"] {
+  --bg:     #F3F3F3;
+  --s1:     #EBEBEB;
+  --s2:     #FFFFFF;
+  --s3:     #F0F0F0;
+  --s4:     #E8E8E8;
+  --topbar: #FFFFFF;
+
+  --bd:  #E0E0E0;
+  --bd2: #C8C8C8;
+  --bd3: #A8A8A8;
+
+  --p1: #1A1A1A;
+  --p2: #5A5A5A;
+  --p3: #8A8A8A;
+
+  --accent: #0078D4;
+  --green:  #107C10;
+  --amber:  #D97706;
+  --red:    #C42B1C;
+  --slate:  #767676;
+
+  --card-shadow:       none;
+  --card-shadow-hover: none;
+  --card-error-bg:     #FFF4F4;
+
+  /* sidebar light overrides */
+  --sb-bg:         #F3F3F3;
+  --sb-s2:         #FFFFFF;
+  --sb-s3:         #E8E8E8;
+  --sb-bd:         #E0E0E0;
+  --sb-bd2:        #C8C8C8;
+  --sb-p1:         #1A1A1A;
+  --sb-p2:         #5A5A5A;
+  --sb-p3:         #8A8A8A;
+  --sb-accent:     #0078D4;
+  --sb-accent-bg:  rgba(0, 120, 212, 0.10);
+  --sb-accent-bd:  rgba(0, 120, 212, 0.22);
+  --sb-active-bg:  rgba(0, 120, 212, 0.12);
+  --sb-active-fg:  #003D6B;
+  --sb-tip-bg:     #1A1A1A;
+  --sb-tip-fg:     #FFFFFF;
+  --sb-shadow:     0 8px 24px rgba(0,0,0,.12);
+}

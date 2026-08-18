@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DNC — Intelligent Vision Platform</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+  <link rel="stylesheet" href="css/theme.css">
+  <link rel="stylesheet" href="css/base.css">
+  <link rel="stylesheet" href="css/layout.css">
+  <link rel="stylesheet" href="css/components.css">
+</head>
+<body>
+
+  <aside class="sidebar">
+    <!-- Brand -->
+    <div class="brand">
+      <img src="../public/imgs/logo_truong.png" class="brand-logo-full" alt="DNC">
+      <img src="../public/imgs/logo_don.png"    class="brand-logo-icon" alt="DNC">
+    </div>
+
+    <hr class="sb-divider">
+
+    <!-- Nav -->
+    <nav class="nav">
+      <div class="nav-section-label">Điều hướng</div>
+
+      <div class="nav-item-wrap">
+        <button class="nav-item active" type="button">
+          <i class="fa-solid fa-table-cells-large"></i>
+          <span class="label">Tất cả demo</span>
+          <span class="tip">Tất cả demo</span>
+        </button>
+      </div>
+
+      <div class="nav-item-wrap">
+        <button class="nav-item" type="button">
+          <i class="fa-solid fa-book"></i>
+          <span class="label">Tài liệu SDK</span>
+          <span class="tip">Tài liệu SDK</span>
+        </button>
+      </div>
+
+      <div class="nav-item-wrap">
+        <button class="nav-item" type="button">
+          <i class="fa-solid fa-server"></i>
+          <span class="label">Thiết bị</span>
+          <span class="tip">Thiết bị</span>
+        </button>
+      </div>
+
+      <div class="nav-item-wrap">
+        <button class="nav-item" type="button">
+          <i class="fa-solid fa-list-check"></i>
+          <span class="label">Nhật ký</span>
+          <span class="tip">Nhật ký</span>
+        </button>
+      </div>
+
+      <!-- Group co submenu -->
+      <div class="nav-item-wrap">
+        <button class="nav-item open" type="button">
+          <i class="fa-solid fa-gear"></i>
+          <span class="label">Cài đặt</span>
+          <i class="fa-solid fa-chevron-down chev"></i>
+          <span class="tip">Cài đặt</span>
+        </button>
+
+        <!-- Submenu inline -->
+        <div class="submenu">
+          <button class="sub-item" type="button">
+            <i class="fa-regular fa-sliders"></i><span>Chung</span>
+          </button>
+          <button class="sub-item" type="button">
+            <i class="fa-regular fa-folder-open"></i><span>Đường dẫn SDK</span>
+          </button>
+          <button class="sub-item" type="button">
+            <i class="fa-solid fa-network-wired"></i><span>Mạng</span>
+          </button>
+          <button class="sub-item" type="button">
+            <i class="fa-regular fa-keyboard"></i><span>Phím tắt</span>
+          </button>
+        </div>
+
+        <!-- Flyout (hien khi collapsed + hover) -->
+        <div class="flyout">
+          <div class="flyout-title">Cài đặt</div>
+          <button class="sub-item" type="button">
+            <i class="fa-regular fa-sliders"></i><span>Chung</span>
+          </button>
+          <button class="sub-item" type="button">
+            <i class="fa-regular fa-folder-open"></i><span>Đường dẫn SDK</span>
+          </button>
+          <button class="sub-item" type="button">
+            <i class="fa-solid fa-network-wired"></i><span>Mạng</span>
+          </button>
+          <button class="sub-item" type="button">
+            <i class="fa-regular fa-keyboard"></i><span>Phím tắt</span>
+          </button>
+        </div>
+      </div>
+    </nav>
+
+    <div class="sb-spacer"></div>
+
+    <!-- Collapse toggle -->
+    <button class="sidebar-toggle" type="button" aria-label="Thu/phong sidebar" title="Thu/phong">
+      <i class="fa-solid fa-bars"></i>
+    </button>
+
+    <!-- Env block -->
+    <div class="env">
+      <div class="nav-section-label" style="padding:0;margin-bottom:8px;">Môi trường</div>
+      <div class="env-row"><span class="env-label">Python</span><span id="env-python">—</span></div>
+      <div class="env-row"><span class="env-label">Platform</span><span id="env-platform">—</span></div>
+      <div class="env-row"><span class="env-label">Qt</span><span id="env-qt">—</span></div>
+      <div class="ver-label">General SDK v3.052 — IS build</div>
+      <div class="env-collapsed-dot" title="SDK ready"></div>
+    </div>
+  </aside>
+
+  <div class="main-col">
+    <header class="topbar">
+      <div class="topbar-right">
+        <div class="search-wrap">
+          <i class="fas fa-search search-icon"></i>
+          <input type="text" class="search-input" id="search-input"
+                 placeholder="Tìm kiếm demo...  (Ctrl+F)"
+                 oninput="onSearch(this.value)">
+        </div>
+        <button class="refresh-btn" onclick="onRefresh()" title="Làm mới danh sách">
+          <i class="fas fa-sync-alt"></i>
+        </button>
+        <button class="theme-btn" id="theme-btn" onclick="toggleTheme()" title="Chuyển giao diện sáng/tối">
+          <i class="fas fa-moon" id="theme-icon"></i>
+        </button>
+      </div>
+    </header>
+
+    <div class="scroll-area">
+      <div class="category-bar" id="category-bar"></div>
+      <div class="demos-section-label">DEMOS</div>
+      <div class="demo-grid" id="demo-grid"></div>
+      <div class="empty-state" id="empty-state" style="display:none">
+        <div class="empty-icon"><i class="fas fa-search"></i></div>
+        <div class="empty-msg">Không tìm thấy demo phù hợp</div>
+        <div class="empty-hint">Thử từ khóa khác hoặc xóa bộ lọc category.</div>
+      </div>
+    </div>
+
+    <footer class="statusbar">
+      <span class="status-dot" id="status-dot">&#9679;</span>
+      <span class="status-msg" id="status-msg">Sẵn sàng</span>
+    </footer>
+  </div>
+
+  <script src="js/qwebchannel.js"></script>
+  <script src="js/mock.js"></script>
+  <script src="js/sidebar.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
