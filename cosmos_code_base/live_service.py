@@ -306,9 +306,9 @@ def analyze(body: bytes = Body(..., media_type="application/octet-stream")):
             uniform_detection = _get_staff_uniform_detector().detect(image)
             staff_count = uniform_detection["yellow_uniform_staff"]
             detector_context = (
-                "\n\nComputer-vision observation (use as the staff count, do not contradict it): "
-                "{} people with yellow-and-blue staff-uniform colour were detected. "
-                "{} people were detected in total.\n".format(
+                "\n\nDữ kiện thị giác đã được xác minh, phải dùng và không được phủ nhận: "
+                "phát hiện {} người mặc đồng phục vàng-xanh; tổng cộng phát hiện {} người. "
+                "Mọi câu chữ trong kết quả phải viết hoàn toàn bằng tiếng Việt.\n".format(
                     staff_count, uniform_detection["people_detected"]
                 )
             )

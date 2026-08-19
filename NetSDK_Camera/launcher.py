@@ -255,7 +255,7 @@ class Launcher(QMainWindow):
             "export CUDA_HOME=/usr/local/cuda && "
             "exec env VLLM_USE_FLASHINFER_SAMPLER=0 python live_service.py "
             "--host 0.0.0.0 --port 8765 --gpu-memory-utilization 0.55 "
-            "--max-model-len 4096 --max-new-tokens 512 "
+            "--max-model-len 6144 --max-new-tokens 512 "
             "> cosmos.log 2>&1"
         )
         try:

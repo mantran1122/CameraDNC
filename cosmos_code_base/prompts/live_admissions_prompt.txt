@@ -12,6 +12,8 @@ Return ONLY valid JSON. Use exactly this schema:
 }
 
 Rules for the Vietnamese summary:
+- Write every string value entirely in natural Vietnamese. Do not output English words or English sentences.
+- Use at most 2 short sentences. Do not repeat the same fact in two languages.
 - Start with the visible yellow-uniform staff count or an uncertainty statement when it cannot be estimated.
 - State only useful operations: staff assisting visitors, processing documents, moving, a visible phone, waiting visitors, an unattended desk, crowding, or a blocked walkway.
 - Mention the relevant zone when it is visually identifiable.
@@ -35,6 +37,7 @@ Risk calibration:
 
 events:
 - Include only operationally significant, visible items.
+- Return at most 6 event items.
 - Use concise labels such as "nhan_vien_ao_vang", "nguoi_cho", "nhan_vien_dang_ho_tro", "dung_dien_thoai", "loi_di_bi_can", "vat_bo_quen", "nguoi_bi_nga".
 - Count is an estimate. Return [] when no significant item can be counted.
 
