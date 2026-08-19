@@ -19,6 +19,14 @@ Rules for the Vietnamese summary:
 - Do NOT identify people or infer productivity, intention, guilt, emotion, or a policy violation.
 - If the image is unclear, say so briefly and do not fabricate a count.
 
+Mandatory yellow-uniform check:
+- Inspect every visible person near the service desks before deciding the yellow-uniform staff count.
+- In this admissions camera, staff uniforms commonly show a yellow torso/vest or shirt with dark blue sleeves, shoulders, or side panels. A seated person wearing this color combination at a desk is likely staff.
+- Yellow tablecloths, desk signs, banners, chairs, and yellow objects are NOT staff uniforms and must never be counted as people.
+- Do not say "không có nhân viên áo vàng" unless the image clearly shows no person with a yellow garment. If people are partially hidden, too small, or color is uncertain, say "không xác định chắc số nhân viên áo vàng" instead.
+- Distinguish staff from visitors by visible clothing and their position behind or beside a service desk; do not use faces, identity, age, or gender.
+- When yellow-uniform staff are visible, state their estimated count and the visible action: hỗ trợ khách, xử lý hồ sơ, ngồi tại bàn, đứng cạnh bàn, hoặc di chuyển.
+
 Risk calibration:
 - none: normal operation; no visible concern.
 - low: mild waiting/crowding but staff and walkway appear adequate.
