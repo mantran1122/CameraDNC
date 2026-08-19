@@ -18,6 +18,7 @@ import threading
 import time
 from contextlib import asynccontextmanager
 from datetime import datetime
+from pathlib import Path
 
 import uvicorn
 from fastapi import Body, FastAPI, Request
@@ -166,14 +167,22 @@ def _load_model() -> None:
         logger.error("Model load failed: %s", exc)
 
 
+def _load_live_prompt() -> str:
+    prompt_path = Path(__file__).resolve().parent / "prompts" / "live_admissions_prompt.txt"
+    if prompt_path.exists():
+        return prompt_path.read_text(encoding="utf-8").strip()
+    return _LIVE_PROMPT
+
+
 def _build_prompt_text(image: Image.Image) -> str:
     """Tạo prompt string theo chat template nếu processor hỗ trợ."""
+    prompt = _load_live_prompt()
     messages = [
         {
             "role": "user",
             "content": [
                 {"type": "image", "image": image},
-                {"type": "text", "text": _LIVE_PROMPT},
+                {"type": "text", "text": prompt},
             ],
         }
     ]
@@ -184,7 +193,7 @@ def _build_prompt_text(image: Image.Image) -> str:
             )
         except Exception:
             pass
-    return _LIVE_PROMPT
+    return prompt
 
 
 def _run_inference(image: Image.Image) -> str:
