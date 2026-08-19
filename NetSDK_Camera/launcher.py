@@ -251,7 +251,8 @@ class Launcher(QMainWindow):
         project_dir = os.getenv("COSMOS_WSL_PROJECT_DIR", "~/CameraDNC/cosmos_code_base")
         command = (
             "cd " + project_dir + " && source .venv/bin/activate && "
-            "export CUDA_HOME=${CUDA_HOME:-/usr/local/cuda} && export PATH=$CUDA_HOME/bin:$PATH && "
+            "export CUDA_HOME=/usr/local/cuda && "
+            "export PATH=/usr/local/cuda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin && "
             "nohup env VLLM_USE_FLASHINFER_SAMPLER=0 python live_service.py "
             "--host 0.0.0.0 --port 8765 --gpu-memory-utilization 0.55 "
             "--max-model-len 4096 --max-new-tokens 512 "
