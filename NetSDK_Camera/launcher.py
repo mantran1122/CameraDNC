@@ -251,7 +251,7 @@ class Launcher(QMainWindow):
             "cd " + project_dir + " && source .venv/bin/activate && "
             "nohup env VLLM_USE_FLASHINFER_SAMPLER=0 python live_service.py "
             "--host 0.0.0.0 --port 8765 --gpu-memory-utilization 0.55 "
-            "--max-model-len 2048 --max-new-tokens 128 "
+            "--max-model-len 4096 --max-new-tokens 128 "
             "</dev/null > cosmos.log 2>&1 &"
         )
         try:
