@@ -1609,6 +1609,8 @@ def _append_analysis_tuning(args: List[str], video_path: Path) -> None:
         )
         for flag, env_name, default in tuning:
             args.extend([flag, os.getenv(env_name, default)])
+        if os.getenv("COSMOS_PLAYBACK_DIRECT_SAMPLING", "1").strip().lower() not in {"0", "false", "no"}:
+            args.append("--direct-sampling")
         return
     _append_optional_arg(args, "--chunk-seconds", "COSMOS_CHUNK_SECONDS")
     _append_optional_arg(args, "--sample-fps", "COSMOS_SAMPLE_FPS")

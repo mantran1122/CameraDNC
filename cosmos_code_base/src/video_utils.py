@@ -18,7 +18,7 @@ class VideoChunk:
     index: int
     start_seconds: float
     end_seconds: float
-    path: Path
+    path: Optional[Path]
     frames: List[Image.Image]
 
 
@@ -235,6 +235,30 @@ def prepare_video_chunks(
     return chunks
 
 
+def build_direct_chunk_manifest(video_path: Path, chunk_seconds: int) -> List[Dict[str, object]]:
+    """Describe analysis windows without creating intermediate video files."""
+    if chunk_seconds <= 0:
+        raise ValueError("chunk_seconds must be > 0")
+    duration = float(get_video_info(video_path)["duration_seconds"])
+    if duration <= 0:
+        raise RuntimeError(f"Cannot determine video duration: {video_path}")
+    chunks: List[Dict[str, object]] = []
+    for index in range(int(math.ceil(duration / chunk_seconds))):
+        start = index * chunk_seconds
+        end = min(start + chunk_seconds, duration)
+        chunks.append(
+            {
+                "index": index,
+                "start_seconds": float(start),
+                "end_seconds": float(end),
+                "start": seconds_to_hhmmss(start, mode="floor"),
+                "end": seconds_to_hhmmss(end, mode="ceil"),
+                "path": "",
+            }
+        )
+    return chunks
+
+
 def _manifest_is_reusable(chunks: List[Dict[str, object]], expected_count: int) -> bool:
     if len(chunks) != expected_count:
         return False
@@ -391,21 +415,31 @@ def iter_video_chunks(
     chunks_root: Path = Path("outputs/chunks"),
     overwrite: bool = False,
     encoder: str = "auto",
+    direct_sampling: bool = False,
 ) -> Iterator[VideoChunk]:
     if sample_fps <= 0:
         raise ValueError("sample_fps must be > 0")
 
-    for item in prepare_video_chunks(
-        video_path=video_path,
-        chunk_seconds=chunk_seconds,
-        chunks_root=chunks_root,
-        overwrite=overwrite,
-        encoder=encoder,
-    ):
+    manifest = (
+        build_direct_chunk_manifest(video_path, chunk_seconds)
+        if direct_sampling
+        else prepare_video_chunks(
+            video_path=video_path,
+            chunk_seconds=chunk_seconds,
+            chunks_root=chunks_root,
+            overwrite=overwrite,
+            encoder=encoder,
+        )
+    )
+    for item in manifest:
         start = float(item["start_seconds"])
         end = float(item["end_seconds"])
-        chunk_path = Path(str(item["path"]))
-        frames = sample_frames(chunk_path, 0.0, end - start, sample_fps)
+        chunk_path = Path(str(item["path"])) if item.get("path") else None
+        frames = (
+            sample_frames(video_path, start, end, sample_fps)
+            if direct_sampling
+            else sample_frames(chunk_path, 0.0, end - start, sample_fps)
+        )
         yield VideoChunk(
             index=int(item["index"]),
             start_seconds=start,

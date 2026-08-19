@@ -19,6 +19,7 @@ from src.vector_store import (
     index_result_file,
 )
 from src.video_utils import (
+    build_direct_chunk_manifest,
     build_video_id,
     get_video_info,
     iter_video_chunks,
@@ -39,6 +40,7 @@ def parse_args():
     parser.add_argument("--summaries-dir", default="outputs/summaries", help="Directory where video summaries are stored")
     parser.add_argument("--force-rechunk", action="store_true", help="Recreate ffmpeg chunk files even if a manifest exists")
     parser.add_argument("--chunk-encoder", default=None, choices=["auto", "copy", "nvenc", "cpu"], help="ffmpeg encoder for chunk files")
+    parser.add_argument("--direct-sampling", action="store_true", help="Sample frames from the source video without creating chunk MP4 files")
     parser.add_argument("--max-new-tokens", type=int, default=None, help="Max generated tokens per chunk")
     parser.add_argument("--model-backend", default="vllm", choices=["vllm", "transformers"], help="Model inference backend")
     parser.add_argument("--gpu-memory-utilization", type=float, default=0.77, help="vLLM GPU memory utilization cap")
@@ -72,16 +74,24 @@ def main():
 
     info = get_video_info(video_path)
     video_id = build_video_id(video_path)
-    chunk_manifest = prepare_video_chunks(
-        video_path=video_path,
-        chunk_seconds=args.chunk_seconds,
-        chunks_root=chunks_root,
-        overwrite=args.force_rechunk,
-        encoder=args.chunk_encoder,
-        progress_callback=lambda completed, total: print(
-            f"Preparing video chunks: {completed}/{total}", file=sys.stderr, flush=True
-        ),
-    )
+    if args.direct_sampling:
+        chunk_manifest = build_direct_chunk_manifest(video_path, args.chunk_seconds)
+        print(
+            f"Preparing video chunks: {len(chunk_manifest)}/{len(chunk_manifest)}",
+            file=sys.stderr,
+            flush=True,
+        )
+    else:
+        chunk_manifest = prepare_video_chunks(
+            video_path=video_path,
+            chunk_seconds=args.chunk_seconds,
+            chunks_root=chunks_root,
+            overwrite=args.force_rechunk,
+            encoder=args.chunk_encoder,
+            progress_callback=lambda completed, total: print(
+                f"Preparing video chunks: {completed}/{total}", file=sys.stderr, flush=True
+            ),
+        )
     print(f"Prepared {len(chunk_manifest)} segment(s) for analysis.", file=sys.stderr, flush=True)
 
     analyzer = None
@@ -106,6 +116,7 @@ def main():
             chunks_root=chunks_root,
             overwrite=False,
             encoder=args.chunk_encoder,
+            direct_sampling=args.direct_sampling,
         )
         chunk_iter = prefetch_chunks(chunk_iter, max_prefetch=args.prefetch_chunks)
         batch_size = max(1, int(args.vllm_batch_size if args.model_backend == "vllm" else 1))
@@ -255,7 +266,7 @@ def _process_chunk_batch(
                 "video_id": video_id,
                 "video_file": str(video_path),
                 "chunk_index": chunk.index,
-                "chunk_path": str(chunk.path),
+                "chunk_path": str(chunk.path) if chunk.path is not None else "",
                 "start_seconds": float(chunk.start_seconds),
                 "end_seconds": float(chunk.end_seconds),
                 "duration_seconds": float(chunk.end_seconds - chunk.start_seconds),
@@ -343,6 +354,7 @@ def build_runtime_info(args) -> dict:
         "gpu_memory_utilization": args.gpu_memory_utilization,
         "max_model_len": args.max_model_len,
         "vllm_batch_size": args.vllm_batch_size,
+        "direct_sampling": args.direct_sampling,
         "prefetch_chunks": args.prefetch_chunks,
     }
 

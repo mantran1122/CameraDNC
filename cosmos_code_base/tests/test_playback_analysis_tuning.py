@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from app.streamlit_app import PLAYBACK_INBOX, _analysis_args
-from src.video_utils import _build_ffmpeg_chunk_command
+from src.video_utils import _build_ffmpeg_chunk_command, build_direct_chunk_manifest
 
 
 def _flag_value(args: list[str], flag: str) -> str:
@@ -23,6 +23,7 @@ def test_playback_uses_fast_analysis_defaults(monkeypatch) -> None:
     assert _flag_value(args, "--sample-fps") == "0.2"
     assert _flag_value(args, "--max-new-tokens") == "384"
     assert _flag_value(args, "--chunk-encoder") == "copy"
+    assert "--direct-sampling" in args
 
 
 def test_regular_upload_does_not_force_playback_tuning(monkeypatch, tmp_path: Path) -> None:
@@ -40,6 +41,7 @@ def test_regular_upload_does_not_force_playback_tuning(monkeypatch, tmp_path: Pa
     assert "--sample-fps" not in args
     assert "--max-new-tokens" not in args
     assert "--chunk-encoder" not in args
+    assert "--direct-sampling" not in args
 
 
 def test_copy_encoder_does_not_reencode_video(tmp_path: Path) -> None:
@@ -55,3 +57,17 @@ def test_copy_encoder_does_not_reencode_video(tmp_path: Path) -> None:
     assert command[command.index("-c:v") + 1] == "copy"
     assert "h264_nvenc" not in command
     assert "libx264" not in command
+
+
+def test_direct_manifest_does_not_create_chunk_files(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(
+        "src.video_utils.get_video_info",
+        lambda _path: {"duration_seconds": 65.0},
+    )
+
+    chunks = build_direct_chunk_manifest(tmp_path / "source.mp4", chunk_seconds=30)
+
+    assert len(chunks) == 3
+    assert [chunk["path"] for chunk in chunks] == ["", "", ""]
+    assert chunks[-1]["start_seconds"] == 60.0
+    assert chunks[-1]["end_seconds"] == 65.0
