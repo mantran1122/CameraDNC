@@ -41,6 +41,7 @@ def parse_args():
     parser.add_argument("--force-rechunk", action="store_true", help="Recreate ffmpeg chunk files even if a manifest exists")
     parser.add_argument("--chunk-encoder", default=None, choices=["auto", "copy", "nvenc", "cpu"], help="ffmpeg encoder for chunk files")
     parser.add_argument("--direct-sampling", action="store_true", help="Sample frames from the source video without creating chunk MP4 files")
+    parser.add_argument("--max-image-side", type=int, default=None, help="Downscale sampled frames so their longest side does not exceed this value")
     parser.add_argument("--max-new-tokens", type=int, default=None, help="Max generated tokens per chunk")
     parser.add_argument("--model-backend", default="vllm", choices=["vllm", "transformers"], help="Model inference backend")
     parser.add_argument("--gpu-memory-utilization", type=float, default=0.77, help="vLLM GPU memory utilization cap")
@@ -117,6 +118,7 @@ def main():
             overwrite=False,
             encoder=args.chunk_encoder,
             direct_sampling=args.direct_sampling,
+            max_image_side=args.max_image_side,
         )
         chunk_iter = prefetch_chunks(chunk_iter, max_prefetch=args.prefetch_chunks)
         batch_size = max(1, int(args.vllm_batch_size if args.model_backend == "vllm" else 1))
@@ -355,6 +357,7 @@ def build_runtime_info(args) -> dict:
         "max_model_len": args.max_model_len,
         "vllm_batch_size": args.vllm_batch_size,
         "direct_sampling": args.direct_sampling,
+        "max_image_side": args.max_image_side,
         "prefetch_chunks": args.prefetch_chunks,
     }
 

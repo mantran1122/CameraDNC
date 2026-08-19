@@ -1603,9 +1603,12 @@ def _append_analysis_tuning(args: List[str], video_path: Path) -> None:
     if _is_playback_video(video_path):
         tuning = (
             ("--chunk-seconds", "COSMOS_PLAYBACK_CHUNK_SECONDS", "30"),
-            ("--sample-fps", "COSMOS_PLAYBACK_SAMPLE_FPS", "0.2"),
-            ("--max-new-tokens", "COSMOS_PLAYBACK_MAX_NEW_TOKENS", "384"),
+            ("--sample-fps", "COSMOS_PLAYBACK_SAMPLE_FPS", "0.1"),
+            ("--max-new-tokens", "COSMOS_PLAYBACK_MAX_NEW_TOKENS", "192"),
             ("--chunk-encoder", "COSMOS_PLAYBACK_CHUNK_ENCODER", "copy"),
+            ("--max-image-side", "COSMOS_PLAYBACK_MAX_IMAGE_SIDE", "960"),
+            ("--cleanup-every", "COSMOS_PLAYBACK_CLEANUP_EVERY", "1"),
+            ("--device-map", "COSMOS_PLAYBACK_DEVICE_MAP", "cuda:0"),
         )
         for flag, env_name, default in tuning:
             args.extend([flag, os.getenv(env_name, default)])

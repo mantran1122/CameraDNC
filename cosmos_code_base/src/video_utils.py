@@ -416,6 +416,7 @@ def iter_video_chunks(
     overwrite: bool = False,
     encoder: str = "auto",
     direct_sampling: bool = False,
+    max_image_side: Optional[int] = None,
 ) -> Iterator[VideoChunk]:
     if sample_fps <= 0:
         raise ValueError("sample_fps must be > 0")
@@ -436,9 +437,9 @@ def iter_video_chunks(
         end = float(item["end_seconds"])
         chunk_path = Path(str(item["path"])) if item.get("path") else None
         frames = (
-            sample_frames(video_path, start, end, sample_fps)
+            sample_frames(video_path, start, end, sample_fps, max_image_side=max_image_side)
             if direct_sampling
-            else sample_frames(chunk_path, 0.0, end - start, sample_fps)
+            else sample_frames(chunk_path, 0.0, end - start, sample_fps, max_image_side=max_image_side)
         )
         yield VideoChunk(
             index=int(item["index"]),
@@ -454,6 +455,7 @@ def sample_frames(
     start_seconds: float,
     end_seconds: float,
     sample_fps: float = 1.0,
+    max_image_side: Optional[int] = None,
 ) -> List[Image.Image]:
     if sample_fps <= 0:
         raise ValueError("sample_fps must be > 0")
@@ -470,16 +472,26 @@ def sample_frames(
         cap.set(cv2.CAP_PROP_POS_MSEC, t * 1000.0)
         ok, frame = cap.read()
         if ok and frame is not None:
-            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            frames.append(Image.fromarray(rgb))
+            frames.append(_frame_to_image(frame, max_image_side))
         t += step
 
     if not frames and end_seconds > start_seconds:
         cap.set(cv2.CAP_PROP_POS_MSEC, ((start_seconds + end_seconds) / 2.0) * 1000.0)
         ok, frame = cap.read()
         if ok and frame is not None:
-            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            frames.append(Image.fromarray(rgb))
+            frames.append(_frame_to_image(frame, max_image_side))
 
     cap.release()
     return frames
+
+
+def _frame_to_image(frame, max_image_side: Optional[int]) -> Image.Image:
+    height, width = frame.shape[:2]
+    if max_image_side and max_image_side > 0 and max(height, width) > max_image_side:
+        scale = float(max_image_side) / float(max(height, width))
+        frame = cv2.resize(
+            frame,
+            (max(1, int(round(width * scale))), max(1, int(round(height * scale)))),
+            interpolation=cv2.INTER_AREA,
+        )
+    return Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
