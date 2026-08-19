@@ -31,10 +31,29 @@ if exist local_env\.venv (
     rmdir /s /q local_env\.venv
 )
 
+set "PYTHON_CMD="
+py -3.12 -c "import sys" >nul 2>&1
+if not errorlevel 1 set "PYTHON_CMD=py -3.12"
+
+if not defined PYTHON_CMD (
+    python -c "import sys; raise SystemExit(0 if (3, 11) <= sys.version_info[:2] <= (3, 12) else 1)" >nul 2>&1
+    if not errorlevel 1 set "PYTHON_CMD=python"
+)
+
+if not defined PYTHON_CMD (
+    echo No compatible Python found. Python 3.11 or 3.12 is required.
+    echo Current Python, if available:
+    python --version
+    echo Install Python 3.12, reopen the terminal, then run this script again.
+    pause
+    exit /b 1
+)
+
+echo Using Python command: %PYTHON_CMD%
 echo Creating venv...
-py -3.12 -m venv local_env\.venv
+%PYTHON_CMD% -m venv local_env\.venv
 if errorlevel 1 (
-    echo Failed to create venv. Make sure Python 3.12 is installed.
+    echo Failed to create venv with: %PYTHON_CMD%
     pause
     exit /b 1
 )
@@ -56,7 +75,12 @@ if errorlevel 1 (
 )
 
 echo Installing project dependencies...
-pip install --no-cache-dir --upgrade -r requirements.txt
+pip install --no-cache-dir --upgrade -r requirements_windows.txt
+if errorlevel 1 (
+    echo Failed to install Windows dependencies.
+    pause
+    exit /b 1
+)
 
 echo.
 echo Checking GPU...
