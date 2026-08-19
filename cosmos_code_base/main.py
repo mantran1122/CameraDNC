@@ -10,7 +10,7 @@ from tqdm import tqdm
 
 from src.model_runner import CosmosVideoAnalyzer
 from src.performance import configure_torch_runtime, get_profile, profile_names
-from src.result_utils import normalize_segment, safe_json_loads, salvage_segment_from_text
+from src.result_utils import contains_cjk, normalize_segment, replace_cjk_content, safe_json_loads, salvage_segment_from_text
 from src.summary_utils import build_video_summary, save_video_summary
 from src.vector_store import (
     DEFAULT_DB_DIR,
@@ -258,9 +258,23 @@ def _process_chunk_batch(
 
     new_segments = []
     for chunk, raw_text, (start_label, end_label) in zip(chunks, raw_texts, labels):
+        if contains_cjk(raw_text):
+            print(
+                f"Non-Vietnamese output detected at {start_label}; retrying in Vietnamese.",
+                file=sys.stderr,
+                flush=True,
+            )
+            raw_text = analyzer.generate_description(
+                frames=chunk.frames,
+                start_time=start_label,
+                end_time=end_label,
+                force_vietnamese=True,
+            )
         parsed = safe_json_loads(raw_text)
         if parsed is None:
             parsed = salvage_segment_from_text(raw_text, start_label, end_label)
+        if contains_cjk(parsed):
+            parsed = replace_cjk_content(parsed, start_label, end_label)
 
         segment = normalize_segment(parsed, start_label, end_label)
         segment.update(

@@ -20,6 +20,7 @@ ALLOWED_ABNORMAL_TYPES = {
 }
 
 ALLOWED_RISK_LEVELS = {"none", "low", "medium", "high"}
+CJK_RE = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
 
 
 def clean_text(text: Any) -> str:
@@ -27,6 +28,53 @@ def clean_text(text: Any) -> str:
     cleaned = re.sub(r"```json|```", "", cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r"^(assistant|thought|user|system)[:\s]*", "", cleaned, flags=re.IGNORECASE)
     return re.sub(r"\s+", " ", cleaned).strip()
+
+
+def contains_cjk(value: Any) -> bool:
+    if isinstance(value, dict):
+        return any(contains_cjk(item) for item in value.values())
+    if isinstance(value, (list, tuple, set)):
+        return any(contains_cjk(item) for item in value)
+    return bool(CJK_RE.search(str(value or "")))
+
+
+def replace_cjk_content(data: Dict[str, Any], start: str, end: str) -> Dict[str, Any]:
+    """Preserve structured detections but never expose Chinese prose in the UI."""
+    cleaned = dict(data)
+    people_count = cleaned.get("people_count", "unknown")
+    phone_detected = bool(cleaned.get("phone_detected", False))
+    crowd_detected = bool(cleaned.get("crowd_detected", False))
+    abnormal = bool(cleaned.get("abnormal", False))
+
+    count_text = (
+        f"Phát hiện khoảng {people_count} người trong khung hình. "
+        if _coerce_people_count(people_count) is not None
+        else "Không xác định chắc chắn số người trong khung hình. "
+    )
+    observations = []
+    if phone_detected:
+        observations.append("Có dấu hiệu sử dụng điện thoại")
+    if crowd_detected:
+        observations.append("Có nhiều người xuất hiện trong khu vực")
+    if abnormal and not observations:
+        observations.append("Có dấu hiệu cần nhân viên giám sát kiểm tra lại")
+    if not observations:
+        observations.append("Không ghi nhận bất thường rõ ràng từ các khung hình mẫu")
+
+    cleaned["start"] = start
+    cleaned["end"] = end
+    cleaned["description"] = count_text + ". ".join(observations) + "."
+    cleaned["objects"] = [item for item in _ensure_list(cleaned.get("objects", [])) if not contains_cjk(item)]
+    cleaned["actions"] = [item for item in _ensure_list(cleaned.get("actions", [])) if not contains_cjk(item)]
+    cleaned["scene_changes"] = "Không xác định được thay đổi cảnh do kết quả ngôn ngữ không hợp lệ."
+    important_event = cleaned.get("important_event")
+    if not isinstance(important_event, dict):
+        important_event = {}
+    important_event = dict(important_event)
+    if contains_cjk(important_event.get("event")):
+        important_event["event"] = "Đoạn video cần được kiểm tra lại."
+    cleaned["important_event"] = important_event
+    return cleaned
 
 
 def safe_json_loads(text: str) -> Optional[Dict[str, Any]]:

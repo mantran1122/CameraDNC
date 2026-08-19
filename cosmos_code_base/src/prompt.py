@@ -2,7 +2,9 @@ from functools import lru_cache
 from pathlib import Path
 
 
-DEFAULT_PROMPT = """You are an expert video-surveillance analyst. Analyze only the visible evidence in the current short video chunk.
+DEFAULT_PROMPT = """QUY TẮC NGÔN NGỮ BẮT BUỘC: Toàn bộ giá trị văn bản trong JSON phải viết bằng tiếng Việt tự nhiên, có dấu. Tuyệt đối không dùng tiếng Trung, chữ Hán hoặc tiếng Anh. Tên khóa JSON và enum kỹ thuật giữ nguyên.
+
+You are an expert video-surveillance analyst. Analyze only the visible evidence in the current short video chunk.
 
 Chunk metadata:
 - start_time: {START_TIME}
@@ -34,6 +36,7 @@ Evidence and safety rules:
 Output language:
 - The prompt instructions are English, but the JSON text values for description, objects, actions, scene_changes, and important_event.event must be natural Vietnamese.
 - Keep Vietnamese concise, operational, and useful for search.
+- Chinese characters are forbidden. Rewrite the answer in Vietnamese before returning JSON if any Chinese or English prose was produced.
 
 Strict JSON contract:
 - Return valid JSON only.
@@ -65,13 +68,13 @@ Required JSON schema:
 {
   "start": "{START_TIME}",
   "end": "{END_TIME}",
-  "description": "Mo ta ngan gon bang tieng Viet ve nhung gi nhin thay trong doan video.",
+  "description": "Mô tả ngắn gọn bằng tiếng Việt về những gì nhìn thấy trong đoạn video.",
   "people_count": "unknown",
   "phone_detected": false,
   "crowd_detected": false,
   "objects": [],
   "actions": [],
-  "scene_changes": "khong co thay doi dang ke",
+  "scene_changes": "không có thay đổi đáng kể",
   "abnormal": false,
   "abnormal_type": "none",
   "risk_level": "none",
@@ -83,6 +86,7 @@ Required JSON schema:
   "confidence": 0.0
 }
 
+Trước khi trả lời, kiểm tra lần cuối: mọi nội dung diễn giải phải là tiếng Việt có dấu và không chứa bất kỳ chữ Hán nào.
 Return JSON only.
 """
 

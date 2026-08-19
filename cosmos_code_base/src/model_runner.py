@@ -150,11 +150,18 @@ class CosmosVideoAnalyzer:
         frames: List[Image.Image],
         start_time: str,
         end_time: str,
+        force_vietnamese: bool = False,
     ) -> str:
         if not frames:
             return self._empty_frame_response(start_time, end_time)
 
         prompt = build_chunk_prompt(start_time, end_time)
+        if force_vietnamese:
+            prompt += (
+                "\n\nKẾT QUẢ TRƯỚC SAI NGÔN NGỮ. Hãy tạo lại JSON từ hình ảnh. "
+                "Mọi câu mô tả và phần tử danh sách bắt buộc bằng tiếng Việt có dấu. "
+                "Không được chứa chữ Hán, tiếng Trung hoặc câu tiếng Anh. Chỉ trả về JSON."
+            )
         if self.backend == "vllm":
             return self._generate_with_vllm(frames, prompt)
         return self._generate_with_transformers(frames, prompt)
