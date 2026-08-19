@@ -39,6 +39,7 @@ STATIC_DIR = APP_DIR / "static"
 OUTPUTS_DIR = APP_DIR / "outputs"
 HISTORY_DIR = OUTPUTS_DIR / "history"
 CONFIG_PATH = APP_DIR / "config.json"
+PLAYBACK_INBOX = APP_DIR / "playback_inbox"
 
 
 def _load_config() -> Dict[str, Any]:
@@ -68,8 +69,59 @@ VECTOR_DB_DIR = APP_DIR / DEFAULT_DB_DIR
 STATIC_DIR.mkdir(exist_ok=True)
 OUTPUTS_DIR.mkdir(exist_ok=True)
 HISTORY_DIR.mkdir(parents=True, exist_ok=True)
+PLAYBACK_INBOX.mkdir(parents=True, exist_ok=True)
 
 EventList = List[Dict[str, Any]]
+
+
+def _load_playback_handoff() -> Dict[str, Any]:
+    """Read only a complete, local Dahua playback handoff addressed to this URL token."""
+    token = str(st.query_params.get("playback_token", "")).strip()
+    if not token:
+        return {}
+    manifest_path = PLAYBACK_INBOX / "playback_handoff.json"
+    try:
+        data = json.loads(manifest_path.read_text(encoding="utf-8"))
+        video = Path(str(data.get("video_path", ""))).resolve()
+        inbox = PLAYBACK_INBOX.resolve()
+        if (data.get("token") != token or data.get("source") != "dahua_playback" or
+                video.suffix.lower() != ".mp4" or inbox not in video.parents or
+                not video.is_file() or video.stat().st_size <= 0):
+            raise ValueError("manifest hoặc video không hợp lệ")
+        data["video"] = video
+        return data
+    except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
+        st.error(f"Không thể nhận video Playback: {exc}")
+        return {}
+
+
+def _reset_for_playback_token(token: str) -> None:
+    if st.session_state.get("playback_token") == token:
+        return
+    st.session_state.playback_token = token
+    st.session_state.events = []
+    st.session_state.search_answer = ""
+    st.session_state.selected_event_index = 0
+    st.session_state.timeline_start_seconds = 0
+    st.session_state.last_analysis_report = None
+    if RESULT_PATH.exists():
+        RESULT_PATH.unlink()
+
+
+def _render_playback_handoff(handoff: Dict[str, Any], api: Any) -> None:
+    video = Path(handoff["video"])
+    st.subheader("Video Playback từ đầu ghi")
+    st.caption(f"Kênh {handoff.get('channel')} · {handoff.get('start_time')} → {handoff.get('end_time')}")
+    st.video(str(video), format="video/mp4")
+    token = str(handoff["token"])
+    attempted = st.session_state.setdefault("playback_attempted_tokens", set())
+    if handoff.get("auto_analyze") and token not in attempted:
+        attempted.add(token)
+        api.run_analysis(video)
+        st.rerun()
+    if st.button("Bắt đầu phân tích", key=f"playback_analyze_{token}", disabled=st.session_state.is_loading):
+        api.run_analysis(video)
+        st.rerun()
 
 
 def main() -> None:
@@ -103,6 +155,9 @@ def main() -> None:
     ensure_history_snapshot()
 
     api = build_ui_api()
+    handoff = _load_playback_handoff()
+    if handoff:
+        _reset_for_playback_token(str(handoff["token"]))
     # Auto-start folder monitor if it was enabled in config
     if st.session_state.get("folder_monitor_enabled", False):
         status = get_folder_monitor_status()
@@ -112,7 +167,14 @@ def main() -> None:
                 start_folder_monitor(api)
 
     if menu == ":material/cloud_upload: Upload Video Mới":
-        if RESULT_PATH.exists():
+        if handoff:
+            _render_playback_handoff(handoff, api)
+            if RESULT_PATH.exists():
+                data = load_result()
+                if not st.session_state.events:
+                    reset_search_state(data)
+                ui.render_result_view(Path(handoff["video"]), st.session_state.events, st.session_state.search_answer, api)
+        elif RESULT_PATH.exists():
             data = load_result()
             if not st.session_state.events:
                 reset_search_state(data)

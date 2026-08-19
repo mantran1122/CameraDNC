@@ -115,6 +115,10 @@ class Ui_MainWindow(object):
         self.Download_pushButton.setEnabled(False)
         self.Download_pushButton.setGeometry(QtCore.QRect(70, 110, 101, 31))
         self.Download_pushButton.setObjectName("Download_pushButton")
+        self.AnalyzeAI_pushButton = QtWidgets.QPushButton(self.groupBox_3)
+        self.AnalyzeAI_pushButton.setEnabled(False)
+        self.AnalyzeAI_pushButton.setGeometry(QtCore.QRect(175, 110, 86, 31))
+        self.AnalyzeAI_pushButton.setObjectName("AnalyzeAI_pushButton")
         self.Download_progressBar = QtWidgets.QProgressBar(self.groupBox_3)
         self.Download_progressBar.setGeometry(QtCore.QRect(70, 150, 118, 23))
         self.Download_progressBar.setMaximum(100)
@@ -162,4 +166,5 @@ class Ui_MainWindow(object):
         self.label_8.setText(_translate("MainWindow", "Thời gian kết thúc"))
         self.End_dateTimeEdit.setDisplayFormat(_translate("MainWindow", "yyyy/M/d HH:mm:ss"))
         self.Download_pushButton.setText(_translate("MainWindow", "Tải xuống"))
+        self.AnalyzeAI_pushButton.setText(_translate("MainWindow", "Phân tích AI"))
 

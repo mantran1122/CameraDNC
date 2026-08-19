@@ -3,6 +3,16 @@ import sys
 import tkinter as tk
 from tkinter import filedialog
 import os
+import json
+import shutil
+import subprocess
+import time
+import uuid
+import webbrowser
+from datetime import datetime
+from pathlib import Path
+from urllib.error import URLError
+from urllib.request import urlopen
 
 from PyQt5.QtWidgets import QApplication, QMainWindow, QMessageBox
 from PyQt5.QtCore import Qt, QDate, QThread, pyqtSignal
@@ -33,6 +43,65 @@ class Mythread(QThread):
 
     def update_data(self, total_size, download_size):
         self.breakSignal.emit(total_size, download_size)
+
+
+class PlaybackHandoffWorker(QThread):
+    """Convert a completed recorder download and hand it to Streamlit off the UI thread."""
+    completed = pyqtSignal(str, str)
+
+    def __init__(self, dav_path, mp4_path, manifest_path, manifest, parent=None):
+        super().__init__(parent)
+        self.dav_path = Path(dav_path)
+        self.mp4_path = Path(mp4_path)
+        self.manifest_path = Path(manifest_path)
+        self.manifest = manifest
+
+    def run(self):
+        try:
+            ffmpeg = os.getenv("COSMOS_FFMPEG") or shutil.which("ffmpeg")
+            ffprobe = os.getenv("COSMOS_FFPROBE") or shutil.which("ffprobe")
+            if not ffmpeg or not ffprobe:
+                raise RuntimeError("Không tìm thấy FFmpeg/ffprobe. Cài FFmpeg hoặc cấu hình COSMOS_FFMPEG và COSMOS_FFPROBE.")
+            primary = [ffmpeg, "-y", "-i", str(self.dav_path), "-map", "0:v:0", "-map", "0:a?", "-c:v", "copy", "-c:a", "aac", str(self.mp4_path)]
+            result = subprocess.run(primary, capture_output=True, text=True, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            if result.returncode:
+                fallback = [ffmpeg, "-y", "-i", str(self.dav_path), "-map", "0:v:0", "-map", "0:a?", "-c:v", "libx264", "-preset", "fast", "-crf", "23", "-c:a", "aac", str(self.mp4_path)]
+                result = subprocess.run(fallback, capture_output=True, text=True, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            if result.returncode or not self.mp4_path.exists() or self.mp4_path.stat().st_size <= 0:
+                raise RuntimeError("Chuyển DAV sang MP4 thất bại. File DAV được giữ lại để kiểm tra.")
+            probe = subprocess.run([ffprobe, "-v", "error", "-show_entries", "stream=codec_type:format=duration", "-of", "json", str(self.mp4_path)], capture_output=True, text=True, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            info = json.loads(probe.stdout or "{}") if probe.returncode == 0 else {}
+            duration = float((info.get("format") or {}).get("duration") or 0)
+            if duration <= 0 or not any(s.get("codec_type") == "video" for s in info.get("streams", [])):
+                raise RuntimeError("MP4 tạo ra không có video hợp lệ. File DAV được giữ lại để kiểm tra.")
+            temporary = self.manifest_path.with_suffix(".json.tmp")
+            temporary.write_text(json.dumps(self.manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+            os.replace(str(temporary), str(self.manifest_path))
+            self._open_streamlit()
+            self.completed.emit("", str(self.mp4_path))
+        except Exception as exc:
+            self.completed.emit(str(exc), str(self.dav_path))
+
+    def _open_streamlit(self):
+        base_url = "http://127.0.0.1:8501"
+        try:
+            urlopen(base_url, timeout=1).close()
+        except (URLError, OSError):
+            project = Path(__file__).resolve().parents[3] / "cosmos_code_base"
+            launcher = project / "run_streamlit.bat"
+            if not launcher.exists():
+                raise RuntimeError(f"Không tìm thấy Streamlit launcher: {launcher}")
+            subprocess.Popen([str(launcher)], cwd=str(project), creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            deadline = time.monotonic() + 45
+            while time.monotonic() < deadline:
+                try:
+                    urlopen(base_url, timeout=1).close()
+                    break
+                except (URLError, OSError):
+                    time.sleep(1)
+            else:
+                raise RuntimeError("Streamlit chưa sẵn sàng sau 45 giây. MP4 đã được giữ lại.")
+        webbrowser.open(f"{base_url}/?playback_token={self.manifest['token']}")
 
 global wnd
 
@@ -85,6 +154,9 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
         self.pause_state = False
         self.record_count = 0
         self.record_infos = NET_RECORDFILE_INFO * 5000
+        self.download_mode = None
+        self.ai_download = None
+        self.handoff_worker = None
 
     # 初始化界面
     def _init_ui(self):
@@ -106,7 +178,11 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
         self.PlayBack_pushbutton.clicked.connect(self.playback_btn_onclick)
         self.Pause_pushbutton.clicked.connect(self.pause_btn_onclick)
         self.Download_pushButton.clicked.connect(self.download_btn_onclick)
+        self.AnalyzeAI_pushButton.clicked.connect(self.analyze_ai_btn_onclick)
         self.SelectDate_calendarWidget.selectionChanged.connect(self.selectdate_calendar_onselectionChanged)
+        self.Channel_comboBox.currentIndexChanged.connect(self.selectdate_calendar_onselectionChanged)
+        self.Start_dateTimeEdit.dateChanged.connect(self._sync_selected_date)
+        self.End_dateTimeEdit.dateChanged.connect(self._sync_selected_date)
         self.StreamTyp_comboBox.currentIndexChanged.connect(self.stream_comboBox_oncurrentIndexChanged)
 
     def login_btn_onclick(self):
@@ -139,6 +215,7 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
                 self.set_stream_type(0)
                 for i in range(int(device_info.nChanNum)):
                     self.Channel_comboBox.addItem(str(i))
+                self.selectdate_calendar_onselectionChanged()
             else:
                 QMessageBox.about(self, 'Thông báo', error_msg)
         else:
@@ -148,6 +225,7 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
             if self.downloadID:
                 self.sdk.StopDownload(self.downloadID)
                 self.downloadID = 0
+            self.download_mode = None
             result = self.sdk.Logout(self.loginID)
             if result:
                 self.setWindowTitle("Xem lại video - Ngoại tuyến")
@@ -164,6 +242,7 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
                 self.PlayBack_pushbutton.setText("Xem lại")
                 self.Pause_pushbutton.setText("Tạm dừng")
                 self.Download_pushButton.setText("Tải xuống")
+                self.AnalyzeAI_pushButton.setEnabled(False)
                 self.PlayBackWnd.repaint()
                 self.Channel_comboBox.clear()
                 self.Download_progressBar.setValue(0)
@@ -180,6 +259,8 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
             return
         self.exist_radioButton.setChecked(False)
         self.PlayBack_pushbutton.setEnabled(False)
+        self.AnalyzeAI_pushButton.setEnabled(False)
+        self.record_count = 0
         date = QDate(self.SelectDate_calendarWidget.selectedDate())
         startTime = NET_TIME()
         startTime.dwYear = date.year()
@@ -205,6 +286,8 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
             self.record_count = fileCount
             self.exist_radioButton.setChecked(True)
             self.PlayBack_pushbutton.setEnabled(True)
+            self._sync_selected_date()
+            self._refresh_ai_button()
 
     def playback_btn_onclick(self):
         if not self.playbackID:
@@ -335,6 +418,75 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
             else:
                 QMessageBox.about(self, 'Thông báo', self.sdk.GetLastErrorMessage())
 
+    def _sync_selected_date(self):
+        """Keep download controls on the calendar date, preserving their selected times."""
+        date = self.SelectDate_calendarWidget.selectedDate()
+        self.Start_dateTimeEdit.setDate(date)
+        self.End_dateTimeEdit.setDate(date)
+        self._refresh_ai_button()
+
+    def _refresh_ai_button(self):
+        valid = bool(self.loginID and self.record_count > 0 and self.Channel_comboBox.currentIndex() >= 0)
+        valid = valid and self.Start_dateTimeEdit.dateTime() < self.End_dateTimeEdit.dateTime()
+        self.AnalyzeAI_pushButton.setEnabled(valid and not self.downloadID and self.handoff_worker is None)
+
+    def _net_time_from_editor(self, editor):
+        date, clock = editor.date(), editor.time()
+        value = NET_TIME()
+        value.dwYear, value.dwMonth, value.dwDay = date.year(), date.month(), date.day()
+        value.dwHour, value.dwMinute, value.dwSecond = clock.hour(), clock.minute(), clock.second()
+        return value
+
+    def analyze_ai_btn_onclick(self):
+        if self.downloadID:
+            QMessageBox.warning(self, "Phân tích AI", "Một tác vụ tải xuống đang chạy.")
+            return
+        start, end = self.Start_dateTimeEdit.dateTime(), self.End_dateTimeEdit.dateTime()
+        max_minutes = int(os.getenv("COSMOS_PLAYBACK_MAX_MINUTES", "30"))
+        if start >= end or start.secsTo(end) > max_minutes * 60:
+            QMessageBox.warning(self, "Phân tích AI", f"Khoảng thời gian phải lớn hơn 0 và không quá {max_minutes} phút.")
+            return
+        start_time, end_time = self._net_time_from_editor(self.Start_dateTimeEdit), self._net_time_from_editor(self.End_dateTimeEdit)
+        result, count, _ = self.query_file(start_time, end_time)
+        if not result or count <= 0:
+            QMessageBox.warning(self, "Phân tích AI", "Không có bản ghi trong khoảng thời gian đã chọn.")
+            return
+        inbox = Path(__file__).resolve().parents[3] / "cosmos_code_base" / "playback_inbox"
+        inbox.mkdir(parents=True, exist_ok=True)
+        token, channel = uuid.uuid4().hex, self.Channel_comboBox.currentIndex()
+        stamp = start.toString("yyyyMMdd_HHmmss") + "_" + end.toString("HHmmss")
+        dav_path = inbox / f"playback_ch{channel}_{stamp}_{token}.dav"
+        self.ai_download = {"dav_path": dav_path, "mp4_path": dav_path.with_suffix(".mp4"), "token": token, "channel": channel, "start": start, "end": end}
+        self.downloadID = self.sdk.DownloadByTimeEx(self.loginID, channel, int(EM_QUERY_RECORD_TYPE.ALL), start_time, end_time, str(dav_path), TimeDownLoadPosCallBack, 0, DownLoadDataCallBack, 0)
+        if not self.downloadID:
+            self.ai_download = None
+            QMessageBox.warning(self, "Phân tích AI", self.sdk.GetLastErrorMessage())
+            return
+        self.download_mode = "ai"
+        self.AnalyzeAI_pushButton.setEnabled(False)
+        self.Download_pushButton.setEnabled(False)
+        self.statusbar.showMessage("Đang tải đoạn video để phân tích AI...")
+
+    def _start_handoff(self, request):
+        if not request["dav_path"].exists() or request["dav_path"].stat().st_size <= 0:
+            self._handoff_finished("File DAV tải về rỗng hoặc không tồn tại.", str(request["dav_path"]))
+            return
+        manifest = {"token": request["token"], "source": "dahua_playback", "video_path": str(request["mp4_path"].resolve()), "channel": request["channel"], "start_time": request["start"].toString(Qt.ISODate), "end_time": request["end"].toString(Qt.ISODate), "auto_analyze": True, "created_at": datetime.now().astimezone().isoformat()}
+        manifest_path = request["mp4_path"].parent / "playback_handoff.json"
+        self.handoff_worker = PlaybackHandoffWorker(request["dav_path"], request["mp4_path"], manifest_path, manifest, self)
+        self.handoff_worker.completed.connect(self._handoff_finished)
+        self.handoff_worker.start()
+        self.statusbar.showMessage("Đang chuyển DAV sang MP4 và mở Streamlit...")
+
+    def _handoff_finished(self, error, path):
+        self.handoff_worker, self.ai_download = None, None
+        self.Download_pushButton.setEnabled(bool(self.loginID))
+        self._refresh_ai_button()
+        if error:
+            QMessageBox.warning(self, "Phân tích AI", f"{error}\nFile giữ lại: {path}")
+        else:
+            self.statusbar.showMessage("Đã mở Streamlit để phân tích video.")
+
     def set_stream_type(self, stream_type):
         # set stream type;设置码流类型
         stream_type = c_int(stream_type)
@@ -345,7 +497,7 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
 
     def query_file(self, startTime, endTime):
         # query record file 查询录像文件
-        result, fileCount, infos = self.sdk.QueryRecordFile(self.loginID, 0, int(EM_QUERY_RECORD_TYPE.ALL), startTime,
+        result, fileCount, infos = self.sdk.QueryRecordFile(self.loginID, self.Channel_comboBox.currentIndex(), int(EM_QUERY_RECORD_TYPE.ALL), startTime,
                                                             endTime, None, 5000, False)
         if not result:
             QMessageBox.about(self, 'Thông báo', self.sdk.GetLastErrorMessage())
@@ -361,13 +513,25 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
     def update_download_progress(self, total_size, download_size):
         try:
             if download_size == -1:
+                completed_mode = self.download_mode
+                request = self.ai_download
+                handle = self.downloadID
+                if handle:
+                    self.sdk.StopDownload(handle)
                 self.downloadID = 0
                 self.Download_progressBar.setValue(0)
-                self.sdk.StopDownload(self.downloadID)
+                self.download_mode = None
+                if completed_mode == "ai" and request:
+                    self._start_handoff(request)
+                    return
                 self.Download_pushButton.setText("Tải xuống")
                 QMessageBox.about(self, 'Thông báo', "Tải xuống hoàn tất!")
             elif download_size == -2:
                 self.downloadID = 0
+                self.download_mode = None
+                self.ai_download = None
+                self.Download_pushButton.setEnabled(bool(self.loginID))
+                self._refresh_ai_button()
                 self.Download_progressBar.setValue(0)
                 self.Download_pushButton.setText("Tải xuống")
                 QMessageBox.about(self, 'Thông báo', "Tải xuống thất bại!")
@@ -391,6 +555,12 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
     # 关闭主窗口时清理资源
     def closeEvent(self, event):
         event.accept()
+        if self.playbackID:
+            self.sdk.StopPlayBack(self.playbackID)
+            self.playbackID = 0
+        if self.downloadID:
+            self.sdk.StopDownload(self.downloadID)
+            self.downloadID = 0
         if self.loginID:
             self.sdk.Logout(self.loginID)
         self.sdk.Cleanup()
