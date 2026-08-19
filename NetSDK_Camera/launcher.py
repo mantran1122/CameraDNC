@@ -186,6 +186,7 @@ class Launcher(QMainWindow):
         self._demo_close_cb      = None
         self._cosmos_url = os.getenv("COSMOS_LIVE_URL", "http://127.0.0.1:8765/analyze")
         self._cosmos_started_by_launcher = False
+        self._cosmos_process = None
 
         # ── WebView ──────────────────────────────────────────────────
         self._view = QWebEngineView()
@@ -252,22 +253,22 @@ class Launcher(QMainWindow):
         command = (
             "cd " + project_dir + " && source .venv/bin/activate && "
             "export CUDA_HOME=/usr/local/cuda && "
-            "nohup setsid env VLLM_USE_FLASHINFER_SAMPLER=0 python live_service.py "
+            "exec env VLLM_USE_FLASHINFER_SAMPLER=0 python live_service.py "
             "--host 0.0.0.0 --port 8765 --gpu-memory-utilization 0.55 "
             "--max-model-len 4096 --max-new-tokens 512 "
-            "</dev/null > cosmos.log 2>&1 &"
+            "> cosmos.log 2>&1"
         )
         try:
-            result = subprocess.run(
+            self._cosmos_process = subprocess.Popen(
                 ["wsl.exe", "-d", distro, "--", "bash", "-lc", command],
-                capture_output=True, text=True, timeout=15, check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
             )
-            self._cosmos_started_by_launcher = result.returncode == 0
+            self._cosmos_started_by_launcher = True
             self._record_cosmos_autostart(
-                "Started detached WSL Cosmos distro={} exit_code={}{}".format(
-                    distro, result.returncode,
-                    "\n" + (result.stdout + result.stderr).strip()
-                    if (result.stdout + result.stderr).strip() else "",
+                "Started managed WSL Cosmos process pid={} distro={}".format(
+                    self._cosmos_process.pid, distro
                 )
             )
         except Exception as exc:
