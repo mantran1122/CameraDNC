@@ -21,6 +21,7 @@ from typing import Any, Dict, List, Tuple
 
 import streamlit as st
 
+from app.playback_media_server import register_playback_video
 from app.ui import dashboard as ui
 from src.result_utils import clean_text
 from src.vector_store import (
@@ -108,28 +109,19 @@ def _reset_for_playback_token(token: str) -> None:
         RESULT_PATH.unlink()
 
 
-def _can_embed_video(video: Path) -> bool:
-    try:
-        limit_mb = max(1, int(os.getenv("COSMOS_STREAMLIT_MAX_EMBED_MB", "128")))
-    except ValueError:
-        limit_mb = 128
-    return video.stat().st_size <= limit_mb * 1024 * 1024
-
-
 def _render_playback_handoff(handoff: Dict[str, Any], api: Any) -> None:
     video = Path(handoff["video"])
+    token = str(handoff["token"])
     st.subheader("Video Playback từ đầu ghi")
     st.caption(f"Kênh {handoff.get('channel')} · {handoff.get('start_time')} → {handoff.get('end_time')}")
-    if _can_embed_video(video):
-        st.video(str(video), format="video/mp4")
-    else:
-        size_gb = video.stat().st_size / (1024 ** 3)
-        st.info(
-            f"Video dài ({size_gb:.2f} GB) không được nhúng trực tiếp để tránh tràn RAM Streamlit. "
-            "AI vẫn phân tích file gốc; xem video đầy đủ trong cửa sổ Playback và xem các đoạn kết quả trên timeline."
-        )
-        st.code(str(video), language=None)
-    token = str(handoff["token"])
+    media_url = register_playback_video(video, token)
+    st.session_state.playback_media_url = media_url
+    st.session_state.playback_media_path = str(video.resolve())
+    st.video(media_url, format="video/mp4")
+    st.caption(
+        f"Đang phát trực tiếp từ file Playback ({video.stat().st_size / (1024 ** 3):.2f} GB); "
+        "trình duyệt chỉ tải phần video cần xem."
+    )
     attempted = st.session_state.setdefault("playback_attempted_tokens", set())
     if handoff.get("auto_analyze") and token not in attempted:
         attempted.add(token)

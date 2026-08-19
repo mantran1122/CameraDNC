@@ -174,22 +174,18 @@ def render_left_column(video_path: Path, events: EventList, api: UiApi) -> None:
     start_time = 0
     if events and selected_idx < len(events):
         start_time = int(events[selected_idx].get("sec", 0))
-    try:
-        max_embed_mb = max(1, int(os.getenv("COSMOS_STREAMLIT_MAX_EMBED_MB", "128")))
-    except ValueError:
-        max_embed_mb = 128
-    if video_path.stat().st_size <= max_embed_mb * 1024 * 1024:
-        st.video(str(video_path), start_time=max(0, start_time))
+    playback_media_url = str(st.session_state.get("playback_media_url", "")).strip()
+    playback_media_path = str(st.session_state.get("playback_media_path", "")).strip()
+    is_current_playback = False
+    if playback_media_path:
+        try:
+            is_current_playback = Path(playback_media_path).resolve() == video_path.resolve()
+        except OSError:
+            pass
+    if playback_media_url and st.session_state.get("playback_token") and is_current_playback:
+        st.video(playback_media_url, format="video/mp4", start_time=max(0, start_time))
     else:
-        selected_chunk = None
-        if events and selected_idx < len(events):
-            selected_chunk = _resolve_chunk(str(events[selected_idx].get("chunk_path", "")))
-        if selected_chunk is not None:
-            st.video(str(selected_chunk))
-        st.info(
-            "Video gốc quá lớn để nhúng an toàn vào Streamlit. "
-            "Chọn sự kiện trên timeline để xem các chunk kết quả nhỏ, hoặc xem toàn bộ bằng cửa sổ Playback."
-        )
+        st.video(str(video_path), start_time=max(0, start_time))
 
 def render_right_panel(events: EventList, search_answer: str, api: UiApi) -> None:
     """Inspector chứa segment đang xem và các công cụ tìm/lọc liên quan."""
