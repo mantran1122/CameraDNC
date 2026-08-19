@@ -1601,12 +1601,34 @@ def _is_playback_video(video_path: Path) -> bool:
 
 def _append_analysis_tuning(args: List[str], video_path: Path) -> None:
     if _is_playback_video(video_path):
+        mode = os.getenv("COSMOS_PLAYBACK_MODE", "fast").strip().lower()
+        profiles = {
+            "fast": {
+                "chunk_seconds": "90",
+                "sample_fps": "0.025",
+                "max_new_tokens": "192",
+                "max_image_side": "768",
+            },
+            "balanced": {
+                "chunk_seconds": "30",
+                "sample_fps": "0.1",
+                "max_new_tokens": "192",
+                "max_image_side": "960",
+            },
+            "detail": {
+                "chunk_seconds": "15",
+                "sample_fps": "0.2",
+                "max_new_tokens": "256",
+                "max_image_side": "1280",
+            },
+        }
+        selected = profiles.get(mode, profiles["fast"])
         tuning = (
-            ("--chunk-seconds", "COSMOS_PLAYBACK_CHUNK_SECONDS", "30"),
-            ("--sample-fps", "COSMOS_PLAYBACK_SAMPLE_FPS", "0.1"),
-            ("--max-new-tokens", "COSMOS_PLAYBACK_MAX_NEW_TOKENS", "192"),
+            ("--chunk-seconds", "COSMOS_PLAYBACK_CHUNK_SECONDS", selected["chunk_seconds"]),
+            ("--sample-fps", "COSMOS_PLAYBACK_SAMPLE_FPS", selected["sample_fps"]),
+            ("--max-new-tokens", "COSMOS_PLAYBACK_MAX_NEW_TOKENS", selected["max_new_tokens"]),
             ("--chunk-encoder", "COSMOS_PLAYBACK_CHUNK_ENCODER", "copy"),
-            ("--max-image-side", "COSMOS_PLAYBACK_MAX_IMAGE_SIDE", "960"),
+            ("--max-image-side", "COSMOS_PLAYBACK_MAX_IMAGE_SIDE", selected["max_image_side"]),
             ("--cleanup-every", "COSMOS_PLAYBACK_CLEANUP_EVERY", "1"),
             ("--device-map", "COSMOS_PLAYBACK_DEVICE_MAP", "cuda:0"),
         )
