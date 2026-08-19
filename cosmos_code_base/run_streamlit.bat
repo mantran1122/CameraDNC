@@ -31,6 +31,6 @@ if not exist "%VENV_PYTHON%" (
   exit /b 1
 )
 
-"%VENV_PYTHON%" -m streamlit run app\streamlit_app.py
+"%VENV_PYTHON%" -m streamlit run app\streamlit_app.py --server.address=127.0.0.1 --server.port=8501 --server.headless=true --browser.gatherUsageStats=false
 
 pause

@@ -80,7 +80,8 @@ class PlaybackHandoffWorker(QThread):
             self._open_streamlit()
             self.completed.emit("", str(self.mp4_path))
         except Exception as exc:
-            self.completed.emit(str(exc), str(self.dav_path))
+            retained = self.mp4_path if self.mp4_path.exists() and self.mp4_path.stat().st_size > 0 else self.dav_path
+            self.completed.emit(str(exc), str(retained))
 
     def _open_streamlit(self):
         base_url = "http://127.0.0.1:8501"
@@ -91,16 +92,38 @@ class PlaybackHandoffWorker(QThread):
             launcher = project / "run_streamlit.bat"
             if not launcher.exists():
                 raise RuntimeError(f"Không tìm thấy Streamlit launcher: {launcher}")
-            subprocess.Popen(["cmd.exe", "/c", str(launcher)], cwd=str(project), creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-            deadline = time.monotonic() + 45
+            log_path = project / "playback_inbox" / "streamlit_startup.log"
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            with log_path.open("ab") as log_file:
+                log_file.write(f"\n--- {datetime.now().astimezone().isoformat()} ---\n".encode("utf-8"))
+                process = subprocess.Popen(
+                    ["cmd.exe", "/d", "/c", str(launcher)],
+                    cwd=str(project),
+                    stdin=subprocess.DEVNULL,
+                    stdout=log_file,
+                    stderr=subprocess.STDOUT,
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                )
+            try:
+                timeout_seconds = max(30, int(os.getenv("COSMOS_STREAMLIT_START_TIMEOUT", "180")))
+            except ValueError:
+                timeout_seconds = 180
+            deadline = time.monotonic() + timeout_seconds
             while time.monotonic() < deadline:
                 try:
                     urlopen(base_url, timeout=1).close()
                     break
                 except (URLError, OSError):
+                    if process.poll() is not None:
+                        try:
+                            details = log_path.read_text(encoding="utf-8", errors="replace")[-2000:].strip()
+                        except OSError:
+                            details = ""
+                        suffix = f"\n\nLog cuối:\n{details}" if details else ""
+                        raise RuntimeError(f"Streamlit dừng khi khởi động (mã {process.returncode}). Xem log: {log_path}{suffix}")
                     time.sleep(1)
             else:
-                raise RuntimeError("Streamlit chưa sẵn sàng sau 45 giây. MP4 đã được giữ lại.")
+                raise RuntimeError(f"Streamlit chưa sẵn sàng sau {timeout_seconds} giây. Xem log: {log_path}")
         webbrowser.open(f"{base_url}/?playback_token={self.manifest['token']}")
 
 wnd = None
