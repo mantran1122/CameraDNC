@@ -185,6 +185,27 @@ def _get_staff_uniform_detector():
     return _staff_uniform_detector
 
 
+def _contains_english_summary(text: str) -> bool:
+    lowered = " " + text.lower() + " "
+    markers = (
+        " staff ", " wearing ", " visitors ", " desk ", " people ",
+        " assisting ", " waiting ", " while ", " uniforms ", " reception ",
+    )
+    return any(marker in lowered for marker in markers)
+
+
+def _vietnamese_detector_summary(staff_count: int, people_count: int, risk_level: str) -> str:
+    summary = "Phát hiện {} nhân viên áo vàng trong tổng số {} người.".format(
+        staff_count, people_count
+    )
+    risk_text = {
+        "low": " Khu vực hơi đông nhưng chưa thấy nguy cơ rõ ràng.",
+        "medium": " Khu vực cần được kiểm tra do có dấu hiệu cần chú ý.",
+        "high": " Có dấu hiệu rủi ro cao, cần kiểm tra ngay.",
+    }.get(str(risk_level).lower(), " Hoạt động quan sát được đang ở trạng thái bình thường.")
+    return summary + risk_text
+
+
 def _build_prompt_text(image: Image.Image, detector_context: str = "") -> str:
     """Tạo prompt string theo chat template nếu processor hỗ trợ."""
     prompt = _load_live_prompt()
@@ -346,11 +367,18 @@ def analyze(body: bytes = Body(..., media_type="application/octet-stream")):
             result["events"].insert(0, {"label": "nhan_vien_ao_vang", "count": staff_count})
             if staff_count:
                 summary = str(result.get("summary", "")).strip()
-                if "không có nhân viên áo vàng" in summary.lower():
-                    summary = ""
-                result["summary"] = "Phát hiện {} nhân viên áo vàng. {}".format(
-                    staff_count, summary
-                ).strip()
+                if _contains_english_summary(summary):
+                    result["summary"] = _vietnamese_detector_summary(
+                        staff_count,
+                        uniform_detection["people_detected"],
+                        result.get("risk_level", "none"),
+                    )
+                else:
+                    if "không có nhân viên áo vàng" in summary.lower():
+                        summary = ""
+                    result["summary"] = "Phát hiện {} nhân viên áo vàng. {}".format(
+                        staff_count, summary
+                    ).strip()
 
         return {
             "status": "ok",
