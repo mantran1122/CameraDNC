@@ -10,7 +10,10 @@ from ctypes import POINTER, c_ubyte, cast, sizeof
 
 from PyQt5.QtCore import Qt, QTimer, pyqtSignal
 from PyQt5.QtGui import QIntValidator
-from PyQt5.QtWidgets import QApplication, QCheckBox, QLabel, QMainWindow, QMessageBox
+from PyQt5.QtWidgets import (
+    QApplication, QCheckBox, QFrame, QGridLayout, QLabel, QMainWindow,
+    QMessageBox, QPlainTextEdit, QSizePolicy, QVBoxLayout,
+)
 
 from Demo.RealPlayDemo.RealPlayUI import Ui_MainWindow
 from NetSDK.NetSDK import NetClient
@@ -18,6 +21,7 @@ from NetSDK.SDK_Callback import fDisConnect, fHaveReConnect, fSnapRev
 from NetSDK.SDK_Enum import SDK_RealPlayType, EM_LOGIN_SPAC_CAP_TYPE
 from NetSDK.SDK_Struct import C_LLONG, SNAP_PARAMS, NET_IN_LOGIN_WITH_HIGHLEVEL_SECURITY, NET_OUT_LOGIN_WITH_HIGHLEVEL_SECURITY
 from connection_preferences import clear_connection, load_connection, save_connection
+from theme import T
 
 
 def _positive_float_from_env(name, default):
@@ -59,11 +63,13 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
         self._init_ui()
 
     def _init_ui(self):
+        self.setWindowTitle('Xem camera trực tiếp')
+        self.setMinimumSize(960, 720)
+        self.resize(1180, 820)
+        self.centralwidget.setStyleSheet('background: {}; color: {};'.format(T.BG, T.P1))
         self.login_btn.setText('Đăng nhập')
         self.play_btn.setText('Bắt đầu xem')
         self.play_btn.setEnabled(False)
-        # Credentials are saved only with the explicit checkbox consent below.
-        # Environment variables remain useful deployment defaults.
         connection = load_connection()
         self.IP_lineEdit.setText(connection['host'])
         self.Port_lineEdit.setText(connection['port'])
@@ -71,29 +77,94 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
         self.Pwd_lineEdit.setText(connection['password'])
         self.Port_lineEdit.setValidator(QIntValidator(1, 65535, self))
         self.remember_check = QCheckBox('Lưu thông tin đăng nhập trên máy này', self.centralwidget)
-        self.remember_check.setGeometry(10, 445, 260, 24)
         self.remember_check.setChecked(connection['remember'])
         self.remember_check.toggled.connect(self._on_remember_toggled)
         self.ai_check = QCheckBox('Phân tích Cosmos (mỗi {} giây)'.format(int(self.cosmos_interval_seconds)), self.centralwidget)
-        self.ai_check.setGeometry(270, 445, 220, 24)
         self.ai_check.setEnabled(False)
         self.ai_check.toggled.connect(self._on_ai_toggled)
         self.cosmos_label = QLabel('Cosmos: đã tắt', self.centralwidget)
-        self.cosmos_label.setGeometry(10, 515, 480, 20)
-        # Make room for the consent control in the generated demo UI.
-        self.StreamTyp_comboBox.move(90, 485)
-        self.label_5.move(10, 485)
-        self.play_btn.move(260, 478)
-        self.resize(self.width(), 560)
+        self.cosmos_label.setWordWrap(True)
+        self.cosmos_log = QPlainTextEdit(self.centralwidget)
+        self.cosmos_log.setReadOnly(True)
+        self.cosmos_log.setMaximumBlockCount(80)
+        self.cosmos_log.setLineWrapMode(QPlainTextEdit.WidgetWidth)
+        self._build_responsive_layout()
         self.statusbar.showMessage('Chưa kết nối đầu ghi')
         self.setWindowFlag(Qt.WindowMinimizeButtonHint)
         self.setWindowFlag(Qt.WindowCloseButtonHint)
-        self.setFixedSize(self.width(), self.height())
         self.login_btn.clicked.connect(self.login_btn_onclick)
         self.play_btn.clicked.connect(self.play_btn_onclick)
         self.sample_timer = QTimer(self)
         self.sample_timer.setInterval(int(self.cosmos_interval_seconds * 1000))
         self.sample_timer.timeout.connect(self._request_snapshot)
+
+    def _build_responsive_layout(self):
+        """Replace the generated fixed-position demo form with a resizable live workspace."""
+        layout = QVBoxLayout(self.centralwidget)
+        layout.setContentsMargins(18, 18, 18, 14)
+        layout.setSpacing(14)
+
+        self.PlayWnd.setMinimumHeight(390)
+        self.PlayWnd.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.PlayWnd.setAlignment(Qt.AlignCenter)
+        self.PlayWnd.setStyleSheet(
+            'background: {}; border: 1px solid {}; border-radius: {}px; color: {};'.format(
+                T.SIDEBAR, T.BD2, T.RADIUS_CARD, T.P2
+            )
+        )
+        layout.addWidget(self.PlayWnd, 1)
+
+        connection_panel = QFrame(self.centralwidget)
+        connection_panel.setStyleSheet(
+            'QFrame {{ background: {}; border: 1px solid {}; border-radius: {}px; }} '
+            'QLabel {{ color: {}; font-weight: 600; }} '
+            'QLineEdit, QComboBox {{ background: {}; color: {}; border: 1px solid {}; border-radius: {}px; padding: 7px 9px; min-height: 22px; }} '
+            'QPushButton {{ background: {}; color: {}; border: none; border-radius: {}px; padding: 8px 16px; font-weight: 700; min-height: 24px; }} '
+            'QPushButton:disabled {{ background: {}; color: {}; }} '
+            'QCheckBox {{ color: {}; background: transparent; }}'.format(
+                T.S2, T.BD, T.RADIUS_CARD, T.P2, T.S1, T.P1, T.BD2, T.RADIUS_INPUT,
+                T.ACCENT, T.P1, T.RADIUS_BTN, T.S3, T.P3, T.P2
+            )
+        )
+        controls = QGridLayout(connection_panel)
+        controls.setContentsMargins(16, 14, 16, 14)
+        controls.setHorizontalSpacing(12)
+        controls.setVerticalSpacing(10)
+        controls.addWidget(self.IP_label, 0, 0)
+        controls.addWidget(self.IP_lineEdit, 0, 1, 1, 3)
+        controls.addWidget(self.Port_label, 0, 4)
+        controls.addWidget(self.Port_lineEdit, 0, 5)
+        controls.addWidget(self.login_btn, 0, 6, 2, 1)
+        controls.addWidget(self.Name_label, 1, 0)
+        controls.addWidget(self.Name_lineEdit, 1, 1, 1, 2)
+        controls.addWidget(self.Pwd_label, 1, 3)
+        controls.addWidget(self.Pwd_lineEdit, 1, 4, 1, 2)
+        controls.addWidget(self.remember_check, 2, 0, 1, 3)
+        controls.addWidget(self.Channel_label, 2, 3)
+        controls.addWidget(self.Channel_comboBox, 2, 4)
+        controls.addWidget(self.label_5, 2, 5)
+        controls.addWidget(self.StreamTyp_comboBox, 2, 6)
+        controls.addWidget(self.ai_check, 3, 0, 1, 4)
+        controls.addWidget(self.play_btn, 3, 5, 1, 2)
+        for column in (1, 2, 3):
+            controls.setColumnStretch(column, 1)
+        layout.addWidget(connection_panel)
+
+        ai_panel = QFrame(self.centralwidget)
+        ai_panel.setStyleSheet(
+            'QFrame {{ background: {}; border: 1px solid {}; border-radius: {}px; }} '
+            'QLabel {{ color: {}; background: transparent; font-weight: 600; padding: 2px; }} '
+            'QPlainTextEdit {{ background: {}; color: {}; border: none; font-family: {}; padding: 4px; }}'.format(
+                T.S2, T.BD, T.RADIUS_CARD, T.P1, T.SIDEBAR, T.P2, T.MONO
+            )
+        )
+        ai_layout = QVBoxLayout(ai_panel)
+        ai_layout.setContentsMargins(16, 12, 16, 12)
+        ai_layout.setSpacing(6)
+        ai_layout.addWidget(self.cosmos_label)
+        ai_layout.addWidget(self.cosmos_log)
+        self.cosmos_log.setFixedHeight(96)
+        layout.addWidget(ai_panel)
 
     def _on_remember_toggled(self, checked):
         if not checked:
@@ -181,10 +252,12 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
             self._inference_inflight = False
 
     def _show_cosmos_result(self, text):
-        self.cosmos_label.setText('Cosmos: ' + text)
+        self.cosmos_label.setText('Cosmos: đã nhận kết quả phân tích')
+        self.cosmos_log.appendPlainText(text)
 
     def _show_cosmos_status(self, text):
         self.cosmos_label.setText(text)
+        self.cosmos_log.appendPlainText(text)
 
     def _shutdown_cosmos_if_enabled(self):
         if not self.cosmos_stop_on_exit:
