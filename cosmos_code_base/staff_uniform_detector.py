@@ -44,6 +44,7 @@ class YellowUniformDetector:
             classes=[0],  # COCO class 0: person
             conf=float(os.getenv("STAFF_PERSON_CONFIDENCE", "0.30")),
             imgsz=int(os.getenv("STAFF_DETECTOR_IMAGE_SIZE", "960")),
+            device=os.getenv("STAFF_DETECTOR_DEVICE", "cpu"),
             verbose=False,
         )[0]
 
