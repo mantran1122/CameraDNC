@@ -260,7 +260,11 @@ class Launcher(QMainWindow):
         try:
             kwargs = {"stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL}
             if os.name == "nt":
-                kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+                kwargs["creationflags"] = (
+                    subprocess.CREATE_NO_WINDOW
+                    | subprocess.CREATE_NEW_PROCESS_GROUP
+                    | subprocess.DETACHED_PROCESS
+                )
             process = subprocess.Popen(
                 ["wsl.exe", "-d", distro, "--", "bash", "-lc", command], **kwargs
             )
