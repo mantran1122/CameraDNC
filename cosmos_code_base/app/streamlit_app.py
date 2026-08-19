@@ -133,11 +133,34 @@ def _render_playback_handoff(handoff: Dict[str, Any], api: Any) -> None:
     attempted = st.session_state.setdefault("playback_attempted_tokens", set())
     if handoff.get("auto_analyze") and token not in attempted:
         attempted.add(token)
-        api.run_analysis(video)
-        st.rerun()
+        if api.run_analysis(video):
+            st.rerun()
     if st.button("Bắt đầu phân tích", key=f"playback_analyze_{token}", disabled=st.session_state.is_loading):
-        api.run_analysis(video)
-        st.rerun()
+        st.session_state.last_analysis_report = None
+        if api.run_analysis(video):
+            st.rerun()
+    _render_playback_analysis_report(video)
+
+
+def _render_playback_analysis_report(video: Path) -> None:
+    report = st.session_state.get("last_analysis_report") or {}
+    if not report or Path(str(report.get("video_path", ""))) != video:
+        return
+    if report.get("ok"):
+        st.success(_format_analysis_report(report))
+        return
+    error = clean_text(report.get("error", "")) or "Pipeline phân tích đã kết thúc với lỗi."
+    st.error(f"Phân tích chưa chạy thành công: {error}")
+    log_path = Path(str(report.get("log_path", "")))
+    if log_path.is_file():
+        st.caption(f"Log phân tích: {log_path}")
+        try:
+            tail = log_path.read_text(encoding="utf-8", errors="replace")[-4000:].strip()
+        except OSError:
+            tail = ""
+        if tail:
+            with st.expander("Xem log lỗi", expanded=True):
+                st.code(tail, language="text")
 
 
 def main() -> None:
