@@ -78,6 +78,9 @@ def main():
         chunks_root=chunks_root,
         overwrite=args.force_rechunk,
         encoder=args.chunk_encoder,
+        progress_callback=lambda completed, total: print(
+            f"Preparing video chunks: {completed}/{total}", file=sys.stderr, flush=True
+        ),
     )
     print(f"Prepared {len(chunk_manifest)} segment(s) for analysis.", file=sys.stderr, flush=True)
 

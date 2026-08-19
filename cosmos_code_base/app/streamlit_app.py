@@ -1433,6 +1433,7 @@ def _run_analysis_subprocess(video_path: Path, progress_callback: Any = None) ->
         with log_path.open("w", encoding="utf-8") as log_file:
             log_file.write(f"Command: {' '.join(command)}\n")
             log_file.write(f"Video: {video_path}\n\n")
+            log_file.flush()
             if process.stdout is not None:
                 for line in process.stdout:
                     line_stripped = line.rstrip()
@@ -1482,6 +1483,17 @@ def run_analysis(video_path: Path) -> bool:
 
     def update_progress(line: str) -> None:
         current = st.session_state.analysis_progress
+        preparing = re.search(r"Preparing video chunks:\s*(\d+)\s*/\s*(\d+)", line)
+        if preparing:
+            prepared_count, prepared_total = int(preparing.group(1)), max(1, int(preparing.group(2)))
+            percent = min(15.0, prepared_count / prepared_total * 15.0)
+            stage = f"Đang chuẩn bị video · {prepared_count}/{prepared_total} đoạn"
+            st.session_state.analysis_progress = {
+                "percent": percent, "completed": 0, "total": 0, "stage": stage
+            }
+            progress_bar.progress(int(percent), text=stage)
+            status_slot.caption(f"FFmpeg đang chuẩn bị đoạn {prepared_count}/{prepared_total}")
+            return
         completed, total = _parse_analysis_progress(line, int(current.get("completed", 0)), int(current.get("total", 0)))
         lowered = line.lower()
         stage = current.get("stage", "Đang phân tích")
@@ -1489,7 +1501,7 @@ def run_analysis(video_path: Path) -> bool:
             if keyword in lowered:
                 stage = label
                 break
-        percent = _analysis_percent(completed, total)
+        percent = 15.0 + (_analysis_percent(completed, total) * 0.85) if total else 15.0
         st.session_state.analysis_progress = {"percent": percent, "completed": completed, "total": total, "stage": stage}
         progress_bar.progress(int(percent), text=f"{stage} · {completed}/{total} phân đoạn" if total else stage)
         status_slot.caption(f"Tiến trình thực: {completed}/{total} phân đoạn" if total else "Đang chờ hệ thống xác định số phân đoạn…")

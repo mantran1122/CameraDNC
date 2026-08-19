@@ -7,7 +7,7 @@ import subprocess
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
-from typing import Dict, Iterator, List
+from typing import Callable, Dict, Iterator, List, Optional
 
 import cv2
 from PIL import Image
@@ -144,6 +144,7 @@ def prepare_video_chunks(
     chunks_root: Path = Path("outputs/chunks"),
     overwrite: bool = False,
     encoder: str = "auto",
+    progress_callback: Optional[Callable[[int, int], None]] = None,
 ) -> List[Dict[str, object]]:
     if chunk_seconds <= 0:
         raise ValueError("chunk_seconds must be > 0")
@@ -162,6 +163,8 @@ def prepare_video_chunks(
         raise RuntimeError(f"Cannot determine video duration: {video_path}")
 
     chunk_count = int(math.ceil(duration / chunk_seconds))
+    if progress_callback:
+        progress_callback(0, chunk_count)
     manifest_path = chunks_dir / "chunks.json"
 
     if not overwrite and manifest_path.exists():
@@ -196,6 +199,8 @@ def prepare_video_chunks(
                 "path": str(chunk_path),
             }
         )
+        if progress_callback:
+            progress_callback(index + 1, chunk_count)
 
     manifest = {
         "video_file": str(video_path),
