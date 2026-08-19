@@ -303,7 +303,8 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
                 return
 
             inParam = NET_IN_PLAY_BACK_BY_TIME_INFO()
-            inParam.hWnd = c_long(self.PlayBackWnd.winId())
+            # PyQt5/SIP may expose winId() as sip.voidptr; ctypes needs a plain integer.
+            inParam.hWnd = int(self.PlayBackWnd.winId())
             inParam.cbDownLoadPos = DownLoadPosCallBack
             inParam.dwPosUser = 0
             inParam.fDownLoadDataCallBack = DownLoadDataCallBack
