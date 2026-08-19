@@ -25,8 +25,6 @@ from fastapi import Body, FastAPI, Request
 from fastapi.responses import JSONResponse
 from PIL import Image
 
-from staff_uniform_detector import YellowUniformDetector
-
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
@@ -42,7 +40,7 @@ _status_detail: str | None = None
 _model = None
 _processor = None
 _sampling_params = None
-_staff_uniform_detector = YellowUniformDetector()
+_staff_uniform_detector = None
 
 # Đảm bảo không có 2 inference chạy cùng lúc
 _inference_lock = threading.Lock()
@@ -177,6 +175,16 @@ def _load_live_prompt() -> str:
     return _LIVE_PROMPT
 
 
+def _get_staff_uniform_detector():
+    """Load OpenCV/YOLO only after vLLM is ready to avoid startup library conflicts."""
+    global _staff_uniform_detector
+    if _staff_uniform_detector is None:
+        from staff_uniform_detector import YellowUniformDetector
+
+        _staff_uniform_detector = YellowUniformDetector()
+    return _staff_uniform_detector
+
+
 def _build_prompt_text(image: Image.Image, detector_context: str = "") -> str:
     """Tạo prompt string theo chat template nếu processor hỗ trợ."""
     prompt = _load_live_prompt()
@@ -295,7 +303,7 @@ def analyze(body: bytes = Body(..., media_type="application/octet-stream")):
         uniform_detection = None
         detector_context = ""
         try:
-            uniform_detection = _staff_uniform_detector.detect(image)
+            uniform_detection = _get_staff_uniform_detector().detect(image)
             staff_count = uniform_detection["yellow_uniform_staff"]
             detector_context = (
                 "\n\nComputer-vision observation (use as the staff count, do not contradict it): "
