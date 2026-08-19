@@ -16,6 +16,7 @@ import importlib
 import json
 import subprocess
 import urllib.request
+from datetime import datetime
 from urllib.parse import urlparse
 from dataclasses import dataclass
 from http.server import HTTPServer, SimpleHTTPRequestHandler
@@ -245,10 +246,12 @@ class Launcher(QMainWindow):
             return
         distro = self._detect_wsl_distro()
         if not distro:
+            self._record_cosmos_autostart("No usable WSL distribution was detected.")
             return
         project_dir = os.getenv("COSMOS_WSL_PROJECT_DIR", "~/CameraDNC/cosmos_code_base")
         command = (
             "cd " + project_dir + " && source .venv/bin/activate && "
+            "export CUDA_HOME=${CUDA_HOME:-/usr/local/cuda} && export PATH=$CUDA_HOME/bin:$PATH && "
             "nohup env VLLM_USE_FLASHINFER_SAMPLER=0 python live_service.py "
             "--host 0.0.0.0 --port 8765 --gpu-memory-utilization 0.55 "
             "--max-model-len 4096 --max-new-tokens 512 "
@@ -260,8 +263,24 @@ class Launcher(QMainWindow):
                 capture_output=True, text=True, timeout=15, check=False,
             )
             self._cosmos_started_by_launcher = result.returncode == 0
-        except Exception:
+            details = (result.stdout + result.stderr).strip()
+            self._record_cosmos_autostart(
+                "WSL distro={} exit_code={}{}".format(
+                    distro, result.returncode, "\n" + details if details else ""
+                )
+            )
+        except Exception as exc:
             self._cosmos_started_by_launcher = False
+            self._record_cosmos_autostart("WSL launch exception: {}".format(exc))
+
+    def _record_cosmos_autostart(self, message):
+        """Keep WSL startup diagnostics beside the launcher instead of failing silently."""
+        try:
+            path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cosmos-autostart.log")
+            with open(path, "a", encoding="utf-8") as handle:
+                handle.write("{} {}\n".format(datetime.now().isoformat(timespec="seconds"), message))
+        except OSError:
+            pass
 
     def _shutdown_managed_cosmos(self):
         if not self._cosmos_started_by_launcher:
