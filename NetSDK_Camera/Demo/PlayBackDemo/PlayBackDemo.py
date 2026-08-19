@@ -291,11 +291,16 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
 
     def playback_btn_onclick(self):
         if not self.playbackID:
-            start_time = self.record_infos[0].starttime
-            if self.record_count >= 2:
-                end_time = self.record_infos[self.record_count - 2].endtime  # 最后一个录像，也就是self.record_infos[self.record_count-1]的endtime可能是0：0:0，所以取倒数第二个的结束时间
-            else:
-                end_time = self.record_infos[0].endtime
+            start, end = self.Start_dateTimeEdit.dateTime(), self.End_dateTimeEdit.dateTime()
+            if start >= end:
+                QMessageBox.warning(self, "Xem lại", "Thời gian bắt đầu phải nhỏ hơn thời gian kết thúc.")
+                return
+            start_time = self._net_time_from_editor(self.Start_dateTimeEdit)
+            end_time = self._net_time_from_editor(self.End_dateTimeEdit)
+            result, file_count, _ = self.query_file(start_time, end_time)
+            if not result or file_count <= 0:
+                QMessageBox.warning(self, "Xem lại", "Không có bản ghi trong khoảng thời gian đã chọn.")
+                return
 
             inParam = NET_IN_PLAY_BACK_BY_TIME_INFO()
             inParam.hWnd = c_long(self.PlayBackWnd.winId())
