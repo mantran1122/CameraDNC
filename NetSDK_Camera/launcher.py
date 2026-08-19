@@ -252,25 +252,23 @@ class Launcher(QMainWindow):
         command = (
             "cd " + project_dir + " && source .venv/bin/activate && "
             "export CUDA_HOME=/usr/local/cuda && "
-            "exec env VLLM_USE_FLASHINFER_SAMPLER=0 python live_service.py "
+            "nohup setsid env VLLM_USE_FLASHINFER_SAMPLER=0 python live_service.py "
             "--host 0.0.0.0 --port 8765 --gpu-memory-utilization 0.55 "
             "--max-model-len 4096 --max-new-tokens 512 "
-            "> cosmos.log 2>&1"
+            "</dev/null > cosmos.log 2>&1 &"
         )
         try:
-            kwargs = {"stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL}
-            if os.name == "nt":
-                kwargs["creationflags"] = (
-                    subprocess.CREATE_NO_WINDOW
-                    | subprocess.CREATE_NEW_PROCESS_GROUP
-                    | subprocess.DETACHED_PROCESS
-                )
-            process = subprocess.Popen(
-                ["wsl.exe", "-d", distro, "--", "bash", "-lc", command], **kwargs
+            result = subprocess.run(
+                ["wsl.exe", "-d", distro, "--", "bash", "-lc", command],
+                capture_output=True, text=True, timeout=15, check=False,
             )
-            self._cosmos_started_by_launcher = True
+            self._cosmos_started_by_launcher = result.returncode == 0
             self._record_cosmos_autostart(
-                "Started WSL Cosmos process pid={} distro={}".format(process.pid, distro)
+                "Started detached WSL Cosmos distro={} exit_code={}{}".format(
+                    distro, result.returncode,
+                    "\n" + (result.stdout + result.stderr).strip()
+                    if (result.stdout + result.stderr).strip() else "",
+                )
             )
         except Exception as exc:
             self._cosmos_started_by_launcher = False
