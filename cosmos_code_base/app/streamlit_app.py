@@ -1592,6 +1592,30 @@ def _append_optional_arg(command: List[str], flag: str, env_name: str) -> None:
         command.extend([flag, value])
 
 
+def _is_playback_video(video_path: Path) -> bool:
+    try:
+        return video_path.resolve().parent == PLAYBACK_INBOX.resolve()
+    except OSError:
+        return False
+
+
+def _append_analysis_tuning(args: List[str], video_path: Path) -> None:
+    if _is_playback_video(video_path):
+        tuning = (
+            ("--chunk-seconds", "COSMOS_PLAYBACK_CHUNK_SECONDS", "30"),
+            ("--sample-fps", "COSMOS_PLAYBACK_SAMPLE_FPS", "0.2"),
+            ("--max-new-tokens", "COSMOS_PLAYBACK_MAX_NEW_TOKENS", "384"),
+            ("--chunk-encoder", "COSMOS_PLAYBACK_CHUNK_ENCODER", "copy"),
+        )
+        for flag, env_name, default in tuning:
+            args.extend([flag, os.getenv(env_name, default)])
+        return
+    _append_optional_arg(args, "--chunk-seconds", "COSMOS_CHUNK_SECONDS")
+    _append_optional_arg(args, "--sample-fps", "COSMOS_SAMPLE_FPS")
+    _append_optional_arg(args, "--max-new-tokens", "COSMOS_MAX_NEW_TOKENS")
+    _append_optional_arg(args, "--chunk-encoder", "COSMOS_CHUNK_ENCODER")
+
+
 def _analysis_args(video_path: Path, run_in_wsl: bool) -> List[str]:
     def p(path: Path) -> str:
         return _to_wsl_path(path) if run_in_wsl else str(path)
@@ -1610,12 +1634,9 @@ def _analysis_args(video_path: Path, run_in_wsl: bool) -> List[str]:
         "--vector-db",
         p(VECTOR_DB_DIR),
     ]
-    _append_optional_arg(args, "--chunk-seconds", "COSMOS_CHUNK_SECONDS")
-    _append_optional_arg(args, "--sample-fps", "COSMOS_SAMPLE_FPS")
-    _append_optional_arg(args, "--max-new-tokens", "COSMOS_MAX_NEW_TOKENS")
+    _append_analysis_tuning(args, video_path)
     _append_optional_arg(args, "--dtype", "COSMOS_DTYPE")
     _append_optional_arg(args, "--attn-implementation", "COSMOS_ATTN_IMPLEMENTATION")
-    _append_optional_arg(args, "--chunk-encoder", "COSMOS_CHUNK_ENCODER")
     _append_optional_arg(args, "--model-backend", "COSMOS_MODEL_BACKEND")
     _append_optional_arg(args, "--gpu-memory-utilization", "COSMOS_GPU_MEMORY_UTILIZATION")
     _append_optional_arg(args, "--max-model-len", "COSMOS_MAX_MODEL_LEN")

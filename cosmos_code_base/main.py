@@ -38,7 +38,7 @@ def parse_args():
     parser.add_argument("--chunks-dir", default="outputs/chunks", help="Directory where ffmpeg chunk files are stored")
     parser.add_argument("--summaries-dir", default="outputs/summaries", help="Directory where video summaries are stored")
     parser.add_argument("--force-rechunk", action="store_true", help="Recreate ffmpeg chunk files even if a manifest exists")
-    parser.add_argument("--chunk-encoder", default=None, choices=["auto", "nvenc", "cpu"], help="ffmpeg encoder for chunk files")
+    parser.add_argument("--chunk-encoder", default=None, choices=["auto", "copy", "nvenc", "cpu"], help="ffmpeg encoder for chunk files")
     parser.add_argument("--max-new-tokens", type=int, default=None, help="Max generated tokens per chunk")
     parser.add_argument("--model-backend", default="vllm", choices=["vllm", "transformers"], help="Model inference backend")
     parser.add_argument("--gpu-memory-utilization", type=float, default=0.77, help="vLLM GPU memory utilization cap")

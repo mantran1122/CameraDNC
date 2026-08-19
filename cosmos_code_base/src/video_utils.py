@@ -166,12 +166,23 @@ def prepare_video_chunks(
     if progress_callback:
         progress_callback(0, chunk_count)
     manifest_path = chunks_dir / "chunks.json"
+    rebuild_chunks = bool(overwrite)
 
     if not overwrite and manifest_path.exists():
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         chunks = manifest.get("chunks", [])
-        if _manifest_is_reusable(chunks, chunk_count):
+        reusable = (
+            manifest.get("chunk_seconds") == chunk_seconds
+            and manifest.get("encoder") == encoder
+            and manifest.get("source_size") == video_path.stat().st_size
+            and manifest.get("source_mtime_ns") == video_path.stat().st_mtime_ns
+            and _manifest_is_reusable(chunks, chunk_count)
+        )
+        if reusable:
             return chunks
+        rebuild_chunks = True
+    elif not overwrite and any(chunks_dir.glob("chunk_*.mp4")):
+        rebuild_chunks = True
 
     chunks: List[Dict[str, object]] = []
     for index in range(chunk_count):
@@ -179,7 +190,7 @@ def prepare_video_chunks(
         end = min(start + chunk_seconds, duration)
         chunk_path = chunks_dir / f"chunk_{index:04d}.mp4"
 
-        if overwrite or not chunk_path.exists() or chunk_path.stat().st_size == 0:
+        if rebuild_chunks or not chunk_path.exists() or chunk_path.stat().st_size == 0:
             _cut_chunk_with_ffmpeg(
                 ffmpeg=ffmpeg,
                 video_path=video_path,
@@ -202,10 +213,21 @@ def prepare_video_chunks(
         if progress_callback:
             progress_callback(index + 1, chunk_count)
 
+    for stale_path in chunks_dir.glob("chunk_*.mp4"):
+        try:
+            stale_index = int(stale_path.stem.rsplit("_", 1)[-1])
+            if stale_index >= chunk_count:
+                stale_path.unlink()
+        except (OSError, ValueError):
+            pass
+
     manifest = {
         "video_file": str(video_path),
         "video_id": video_id,
         "chunk_seconds": chunk_seconds,
+        "encoder": encoder,
+        "source_size": video_path.stat().st_size,
+        "source_mtime_ns": video_path.stat().st_mtime_ns,
         "duration_seconds": duration,
         "chunks": chunks,
     }
@@ -286,7 +308,9 @@ def _build_ffmpeg_chunk_command(
         "-an",
     ]
 
-    if encoder == "nvenc":
+    if encoder == "copy":
+        codec_args = ["-c:v", "copy"]
+    elif encoder == "nvenc":
         codec_args = [
             "-c:v",
             "h264_nvenc",
