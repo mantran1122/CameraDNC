@@ -91,7 +91,7 @@ class PlaybackHandoffWorker(QThread):
             launcher = project / "run_streamlit.bat"
             if not launcher.exists():
                 raise RuntimeError(f"Không tìm thấy Streamlit launcher: {launcher}")
-            subprocess.Popen([str(launcher)], cwd=str(project), creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            subprocess.Popen(["cmd.exe", "/c", str(launcher)], cwd=str(project), creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
             deadline = time.monotonic() + 45
             while time.monotonic() < deadline:
                 try:
@@ -103,7 +103,7 @@ class PlaybackHandoffWorker(QThread):
                 raise RuntimeError("Streamlit chưa sẵn sàng sau 45 giây. MP4 đã được giữ lại.")
         webbrowser.open(f"{base_url}/?playback_token={self.manifest['token']}")
 
-global wnd
+wnd = None
 
 @WINFUNCTYPE(None, C_LLONG, C_DWORD, C_DWORD, C_LDWORD)
 def DownLoadPosCallBack(lLoginID, pchDVRIP, nDVRPort, dwUser):
@@ -121,14 +121,18 @@ def DownLoadDataCallBack(lPlayHandle, dwDataType, pBuffer, dwBufSize, dwUser):
 @WINFUNCTYPE(None, C_LLONG, C_DWORD, C_DWORD, c_int, NET_RECORDFILE_INFO, C_LDWORD)
 def TimeDownLoadPosCallBack(lPlayHandle, dwTotalSize, dwDownLoadSize, index, recordfileinfo, dwUser):
     try:
-        wnd.update_download_progress_thread(dwTotalSize, dwDownLoadSize)
+        target = wnd
+        if target is not None:
+            target.update_download_progress_thread(dwTotalSize, dwDownLoadSize)
     except Exception as e:
         print(e)
 
 
 class MyMainWindow(QMainWindow, Ui_MainWindow):
     def __init__(self, parent=None):
+        global wnd
         super(MyMainWindow, self).__init__(parent)
+        wnd = self
         self.setupUi(self)
 
         # 界面初始化
@@ -518,7 +522,9 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
 
     def update_download_progress(self, total_size, download_size):
         try:
-            if download_size == -1:
+            # C_DWORD is unsigned: NetSDK's -1/-2 sentinels can arrive as
+            # 0xFFFFFFFF/0xFFFFFFFE depending on the ctypes/platform build.
+            if download_size in (-1, 0xFFFFFFFF, 0xFFFFFFFFFFFFFFFF):
                 completed_mode = self.download_mode
                 request = self.ai_download
                 handle = self.downloadID
@@ -532,7 +538,7 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
                     return
                 self.Download_pushButton.setText("Tải xuống")
                 QMessageBox.about(self, 'Thông báo', "Tải xuống hoàn tất!")
-            elif download_size == -2:
+            elif download_size in (-2, 0xFFFFFFFE, 0xFFFFFFFFFFFFFFFE):
                 self.downloadID = 0
                 self.download_mode = None
                 self.ai_download = None
@@ -542,7 +548,9 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
                 self.Download_pushButton.setText("Tải xuống")
                 QMessageBox.about(self, 'Thông báo', "Tải xuống thất bại!")
             else:
-                if download_size >= total_size:
+                if total_size <= 0:
+                    self.Download_progressBar.setValue(0)
+                elif download_size >= total_size:
                     self.Download_progressBar.setValue(100)
                 else:
                     percentage = int(download_size * 100 / total_size)
