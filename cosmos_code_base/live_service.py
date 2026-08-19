@@ -25,6 +25,8 @@ from fastapi import Body, FastAPI, Request
 from fastapi.responses import JSONResponse
 from PIL import Image
 
+from staff_uniform_detector import YellowUniformDetector
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
@@ -40,6 +42,7 @@ _status_detail: str | None = None
 _model = None
 _processor = None
 _sampling_params = None
+_staff_uniform_detector = YellowUniformDetector()
 
 # Đảm bảo không có 2 inference chạy cùng lúc
 _inference_lock = threading.Lock()
@@ -174,7 +177,7 @@ def _load_live_prompt() -> str:
     return _LIVE_PROMPT
 
 
-def _build_prompt_text(image: Image.Image) -> str:
+def _build_prompt_text(image: Image.Image, detector_context: str = "") -> str:
     """Tạo prompt string theo chat template nếu processor hỗ trợ."""
     prompt = _load_live_prompt()
     messages = [
@@ -182,7 +185,7 @@ def _build_prompt_text(image: Image.Image) -> str:
             "role": "user",
             "content": [
                 {"type": "image", "image": image},
-                {"type": "text", "text": prompt},
+                {"type": "text", "text": prompt + detector_context},
             ],
         }
     ]
@@ -193,12 +196,12 @@ def _build_prompt_text(image: Image.Image) -> str:
             )
         except Exception:
             pass
-    return prompt
+    return prompt + detector_context
 
 
-def _run_inference(image: Image.Image) -> str:
+def _run_inference(image: Image.Image, detector_context: str = "") -> str:
     """Chạy inference, trả về chuỗi JSON (chưa parse)."""
-    prompt_text = _build_prompt_text(image)
+    prompt_text = _build_prompt_text(image, detector_context)
     request = {
         "prompt": prompt_text,
         "multi_modal_data": {"image": [image]},
@@ -289,8 +292,23 @@ def analyze(body: bytes = Body(..., media_type="application/octet-stream")):
                 status_code=400,
             )
 
+        uniform_detection = None
+        detector_context = ""
         try:
-            result_text = _run_inference(image)
+            uniform_detection = _staff_uniform_detector.detect(image)
+            staff_count = uniform_detection["yellow_uniform_staff"]
+            detector_context = (
+                "\n\nComputer-vision observation (use as the staff count, do not contradict it): "
+                "{} people with yellow-and-blue staff-uniform colour were detected. "
+                "{} people were detected in total.\n".format(
+                    staff_count, uniform_detection["people_detected"]
+                )
+            )
+        except Exception as exc:
+            logger.warning("Uniform detector unavailable: %s", exc)
+
+        try:
+            result_text = _run_inference(image, detector_context)
         except Exception as exc:
             logger.error("Inference error: %s", exc)
             return JSONResponse(
@@ -309,11 +327,29 @@ def analyze(body: bytes = Body(..., media_type="application/octet-stream")):
                 status_code=500,
             )
 
+        if uniform_detection is not None and isinstance(result, dict):
+            staff_count = uniform_detection["yellow_uniform_staff"]
+            result["yellow_uniform_staff"] = staff_count
+            result["people_detected"] = uniform_detection["people_detected"]
+            result["events"] = [
+                event for event in result.get("events", [])
+                if event.get("label") != "nhan_vien_ao_vang"
+            ]
+            result["events"].insert(0, {"label": "nhan_vien_ao_vang", "count": staff_count})
+            if staff_count:
+                summary = str(result.get("summary", "")).strip()
+                if "không có nhân viên áo vàng" in summary.lower():
+                    summary = ""
+                result["summary"] = "Phát hiện {} nhân viên áo vàng. {}".format(
+                    staff_count, summary
+                ).strip()
+
         return {
             "status": "ok",
             "timestamp": datetime.now().isoformat(timespec="seconds"),
             "inference_ms": inference_ms,
             "result": result,
+            "uniform_detection": uniform_detection,
         }
 
     finally:

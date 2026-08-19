@@ -4,6 +4,7 @@ safetensors
 sentencepiece
 protobuf
 opencv-python
+ultralytics>=8.3
 pillow
 numpy
 tqdm
