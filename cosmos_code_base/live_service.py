@@ -17,11 +17,11 @@ import signal
 import threading
 import time
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import uvicorn
-from fastapi import Body, FastAPI, Request
+from fastapi import Body, FastAPI, Header, Request
 from fastapi.responses import JSONResponse
 from PIL import Image
 
@@ -44,6 +44,58 @@ _staff_uniform_detector = None
 
 # Đảm bảo không có 2 inference chạy cùng lúc
 _inference_lock = threading.Lock()
+
+
+def _event_log_path(captured_at: datetime) -> Path:
+    """Return the daily JSONL audit file for live detections, never frames."""
+    configured = os.getenv("COSMOS_LIVE_EVENT_LOG_DIR", "").strip()
+    base = Path(configured) if configured else Path(__file__).resolve().parent / "outputs" / "live_events"
+    return base / "live_events_{}.jsonl".format(captured_at.strftime("%Y%m%d"))
+
+
+def _parse_capture_time(value: str | None) -> datetime:
+    if value:
+        try:
+            parsed = datetime.fromisoformat(value)
+            return parsed if parsed.tzinfo else parsed.astimezone()
+        except ValueError:
+            logger.warning("Invalid X-Cosmos-Captured-At header: %r", value)
+    return datetime.now().astimezone()
+
+
+def _should_record_event(risk_level: str) -> bool:
+    levels = {"none": 0, "low": 1, "medium": 2, "high": 3}
+    threshold = os.getenv("COSMOS_LIVE_EVENT_MIN_RISK", "low").strip().lower()
+    return levels.get(risk_level.lower(), 0) >= levels.get(threshold, 1)
+
+
+def _record_live_event(result: dict, captured_at: datetime, device_id: str, channel: int | None) -> dict | None:
+    """Persist recorder/channel/time mapping for later playback; never frames."""
+    risk_level = str(result.get("risk_level", "none")).lower()
+    if not _should_record_event(risk_level) or channel is None or channel < 0:
+        return None
+    try:
+        replay_seconds = max(1, int(os.getenv("COSMOS_LIVE_REPLAY_SECONDS", "30")))
+    except ValueError:
+        replay_seconds = 30
+    event = {
+        "event_time": captured_at.isoformat(timespec="seconds"),
+        "device_id": device_id or "unknown",
+        "channel": channel,
+        "replay_start": (captured_at - timedelta(seconds=replay_seconds)).isoformat(timespec="seconds"),
+        "replay_end": (captured_at + timedelta(seconds=replay_seconds)).isoformat(timespec="seconds"),
+        "risk_level": risk_level,
+        "summary": str(result.get("summary", ""))[:2000],
+        "events": result.get("events", []),
+    }
+    try:
+        path = _event_log_path(captured_at)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as output:
+            output.write(json.dumps(event, ensure_ascii=False) + "\n")
+    except OSError as exc:
+        logger.error("Could not write live event metadata: %s", exc)
+    return event
 
 # JSON schema cho guided_json của vllm — bắt model xuất đúng cấu trúc
 _LIVE_SCHEMA = {
@@ -292,7 +344,12 @@ def shutdown(request: Request):
 
 
 @app.post("/analyze")
-def analyze(body: bytes = Body(..., media_type="application/octet-stream")):
+def analyze(
+    body: bytes = Body(..., media_type="application/octet-stream"),
+    x_cosmos_device_id: str | None = Header(default=None),
+    x_cosmos_channel: str | None = Header(default=None),
+    x_cosmos_captured_at: str | None = Header(default=None),
+):
     """
     Nhận JPEG bytes, trả JSON phân tích.
     Endpoint là def thường (không async) để uvicorn đẩy vào threadpool —
@@ -380,12 +437,20 @@ def analyze(body: bytes = Body(..., media_type="application/octet-stream")):
                         staff_count, summary
                     ).strip()
 
+        try:
+            channel = int(x_cosmos_channel) if x_cosmos_channel is not None else None
+        except ValueError:
+            channel = None
+        captured_at = _parse_capture_time(x_cosmos_captured_at)
+        replay = _record_live_event(result, captured_at, x_cosmos_device_id or "", channel)
+
         return {
             "status": "ok",
-            "timestamp": datetime.now().isoformat(timespec="seconds"),
+            "timestamp": datetime.now().astimezone().isoformat(timespec="seconds"),
             "inference_ms": inference_ms,
             "result": result,
             "uniform_detection": uniform_detection,
+            "replay": replay,
         }
 
     finally:

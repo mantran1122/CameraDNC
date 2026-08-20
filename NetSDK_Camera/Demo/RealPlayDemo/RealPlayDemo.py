@@ -4,6 +4,7 @@ import os
 import sys
 import json
 import threading
+from datetime import datetime
 from urllib import request as urlrequest
 from urllib.error import URLError, HTTPError
 from ctypes import POINTER, c_ubyte, cast, sizeof
@@ -12,7 +13,7 @@ from PyQt5.QtCore import Qt, QTimer, pyqtSignal
 from PyQt5.QtGui import QIntValidator
 from PyQt5.QtWidgets import (
     QApplication, QCheckBox, QFrame, QGridLayout, QLabel, QMainWindow,
-    QMessageBox, QPlainTextEdit, QSizePolicy, QVBoxLayout,
+    QMessageBox, QPlainTextEdit, QSizePolicy, QVBoxLayout, QPushButton,
 )
 
 from Demo.RealPlayDemo.RealPlayUI import Ui_MainWindow
@@ -35,7 +36,7 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
     """Connect to one Dahua recorder and render a selected channel."""
 
     connection_changed = pyqtSignal(bool)
-    cosmos_result = pyqtSignal(str)
+    cosmos_result = pyqtSignal(dict)
     cosmos_status = pyqtSignal(str)
 
     def __init__(self, parent=None):
@@ -57,6 +58,9 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
         self._inference_inflight = False
         self._ai_enabled = False
         self._snap_serial = 0
+        self._capture_times = {}
+        self._last_replay = None
+        self._replay_windows = []
         self.cosmos_url = os.getenv('COSMOS_LIVE_URL', 'http://127.0.0.1:8765/analyze')
         self.cosmos_interval_seconds = _positive_float_from_env('COSMOS_SAMPLE_INTERVAL_SECONDS', 10)
         self.cosmos_stop_on_exit = os.getenv('COSMOS_STOP_ON_LIVE_CLOSE', '').strip().lower() in {'1', 'true', 'yes'}
@@ -82,6 +86,9 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
         self.ai_check = QCheckBox('Phân tích Cosmos (mỗi {} giây)'.format(int(self.cosmos_interval_seconds)), self.centralwidget)
         self.ai_check.setEnabled(False)
         self.ai_check.toggled.connect(self._on_ai_toggled)
+        self.replay_btn = QPushButton('Xem lại cảnh báo gần nhất', self.centralwidget)
+        self.replay_btn.setEnabled(False)
+        self.replay_btn.clicked.connect(self._open_last_replay)
         self.cosmos_label = QLabel('Cosmos: đã tắt', self.centralwidget)
         self.cosmos_label.setWordWrap(True)
         self.cosmos_log = QPlainTextEdit(self.centralwidget)
@@ -145,6 +152,7 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
         controls.addWidget(self.label_5, 2, 5)
         controls.addWidget(self.StreamTyp_comboBox, 2, 6)
         controls.addWidget(self.ai_check, 3, 0, 1, 4)
+        controls.addWidget(self.replay_btn, 3, 4)
         controls.addWidget(self.play_btn, 3, 5, 1, 2)
         for column in (1, 2, 3):
             controls.setColumnStretch(column, 1)
@@ -204,6 +212,7 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
         snap.ImageSize = 0
         snap.mode = 0
         self._snap_serial = (self._snap_serial + 1) % 65536
+        self._capture_times[self._snap_serial] = datetime.now().astimezone().isoformat(timespec='seconds')
         snap.CmdSerial = self._snap_serial
         self._snapshot_pending = True
         if not self.sdk.SnapPictureEx(self.loginID, snap):
@@ -222,12 +231,18 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
         byte_count = getattr(length, 'value', length)
         image_bytes = bytes(cast(buffer, POINTER(c_ubyte * byte_count)).contents)
         self._inference_inflight = True
-        threading.Thread(target=self._send_to_cosmos, args=(image_bytes,), daemon=True).start()
+        captured_at = self._capture_times.pop(int(cmd_serial), datetime.now().astimezone().isoformat(timespec='seconds'))
+        threading.Thread(target=self._send_to_cosmos, args=(image_bytes, captured_at), daemon=True).start()
 
-    def _send_to_cosmos(self, image_bytes):
+    def _send_to_cosmos(self, image_bytes, captured_at):
         try:
-            req = urlrequest.Request(self.cosmos_url, data=image_bytes,
-                                     headers={'Content-Type': 'application/octet-stream'}, method='POST')
+            channel = self.Channel_comboBox.currentData()
+            req = urlrequest.Request(self.cosmos_url, data=image_bytes, headers={
+                'Content-Type': 'application/octet-stream',
+                'X-Cosmos-Device-Id': os.getenv('COSMOS_DEVICE_ID', self.IP_lineEdit.text().strip()),
+                'X-Cosmos-Channel': str(channel if channel is not None else ''),
+                'X-Cosmos-Captured-At': captured_at,
+            }, method='POST')
             # First inference can include CUDA graph warm-up and take longer
             # than a normal frame.  Do not abandon it after 15 seconds: an
             # abandoned request keeps the service busy and causes 429s for
@@ -235,10 +250,7 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
             timeout_seconds = float(os.getenv('COSMOS_TIMEOUT_SECONDS', '90'))
             with urlrequest.urlopen(req, timeout=timeout_seconds) as response:
                 payload = json.loads(response.read().decode('utf-8'))
-            result = payload.get('result', {})
-            self.cosmos_result.emit('{} | {} | {} ms'.format(
-                result.get('risk_level', 'none').upper(), result.get('summary', 'Không có mô tả'),
-                payload.get('inference_ms', '?')))
+            self.cosmos_result.emit(payload)
         except HTTPError as exc:
             if exc.code == 429:
                 self.cosmos_status.emit('Cosmos: đang phân tích khung hình trước...')
@@ -251,9 +263,34 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
         finally:
             self._inference_inflight = False
 
-    def _show_cosmos_result(self, text):
+    def _show_cosmos_result(self, payload):
+        result = payload.get('result', {})
+        text = '{} | {} | {} ms'.format(
+            result.get('risk_level', 'none').upper(), result.get('summary', 'Không có mô tả'),
+            payload.get('inference_ms', '?'))
+        self._last_replay = payload.get('replay')
+        self.replay_btn.setEnabled(bool(self._last_replay))
         self.cosmos_label.setText('Cosmos: đã nhận kết quả phân tích')
         self.cosmos_log.appendPlainText(text)
+
+    def _open_last_replay(self):
+        replay = self._last_replay
+        if not replay:
+            return
+        try:
+            from Demo.PlayBackDemo.PlayBackDemo import MyMainWindow as PlaybackWindow
+            window = PlaybackWindow()
+            # Ensure the native playback surface exists before NetSDK binds to it.
+            window.show()
+            window.configure_replay(
+                host=self.IP_lineEdit.text().strip(), port=self.Port_lineEdit.text().strip(),
+                username=self.Name_lineEdit.text().strip(), password=self.Pwd_lineEdit.text(),
+                channel=int(replay['channel']), start_time=replay['replay_start'], end_time=replay['replay_end'],
+            )
+            self._replay_windows.append(window)
+            window.destroyed.connect(lambda *_: self._replay_windows.remove(window) if window in self._replay_windows else None)
+        except Exception as exc:
+            QMessageBox.warning(self, 'Xem lại', 'Không thể mở cửa sổ Playback: {}'.format(exc))
 
     def _show_cosmos_status(self, text):
         self.cosmos_label.setText(text)

@@ -15,7 +15,7 @@ from urllib.error import URLError
 from urllib.request import urlopen
 
 from PyQt5.QtWidgets import QApplication, QMainWindow, QMessageBox
-from PyQt5.QtCore import Qt, QDate, QThread, pyqtSignal
+from PyQt5.QtCore import Qt, QDate, QDateTime, QThread, pyqtSignal
 from ctypes import *
 
 from Demo.PlayBackDemo.PlayBackUI import Ui_MainWindow
@@ -212,6 +212,34 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
         self.End_dateTimeEdit.dateChanged.connect(self._sync_selected_date)
         self.StreamTyp_comboBox.currentIndexChanged.connect(self.stream_comboBox_oncurrentIndexChanged)
 
+    def configure_replay(self, host, port, username, password, channel, start_time, end_time):
+        """Open an independent recorder Playback window for a live AI event."""
+        start = QDateTime.fromString(str(start_time), Qt.ISODate)
+        end = QDateTime.fromString(str(end_time), Qt.ISODate)
+        if not start.isValid() or not end.isValid() or start >= end:
+            raise ValueError('Khoảng thời gian xem lại không hợp lệ.')
+        self.IP_lineEdit.setText(str(host))
+        self.Port_lineEdit.setText(str(port))
+        self.Name_lineEdit.setText(str(username))
+        self.Pwd_lineEdit.setText(str(password))
+        self._pending_replay = (int(channel), start, end)
+        self.login_btn_onclick()
+
+    def _start_pending_replay(self):
+        request = getattr(self, '_pending_replay', None)
+        self._pending_replay = None
+        if request is None:
+            return
+        channel, start, end = request
+        if channel < 0 or channel >= self.Channel_comboBox.count():
+            QMessageBox.warning(self, 'Xem lại', 'Kênh camera của sự kiện không tồn tại trên đầu ghi.')
+            return
+        self.Channel_comboBox.setCurrentIndex(channel)
+        self.SelectDate_calendarWidget.setSelectedDate(start.date())
+        self.Start_dateTimeEdit.setDateTime(start)
+        self.End_dateTimeEdit.setDateTime(end)
+        self.playback_btn_onclick()
+
     def login_btn_onclick(self):
         if not self.loginID:
             ip = self.IP_lineEdit.text()
@@ -243,6 +271,7 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
                 for i in range(int(device_info.nChanNum)):
                     self.Channel_comboBox.addItem(str(i))
                 self.selectdate_calendar_onselectionChanged()
+                self._start_pending_replay()
             else:
                 QMessageBox.about(self, 'Thông báo', error_msg)
         else:
