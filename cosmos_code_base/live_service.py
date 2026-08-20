@@ -142,7 +142,7 @@ risk_level:
 
 events: list every significant object type you see (nguoi, xe_may, o_to, xe_tai, ba_lo, tui_xach, ...).
 Count is an estimate — VLM counts are approximate, not exact.
-summary: Vietnamese, at most 2 short sentences. State the useful visible facts and location; avoid decorative scene narration.
+summary: Vietnamese, 2-4 concise sentences when the scene has multiple useful facts. Preserve relevant detail and location, but avoid decorative narration or unsupported interpretation.
 This is one still frame. Do not claim movement, entry/exit, duration, intent, or change over time unless temporal evidence is explicitly supplied.
 
 Return JSON only."""
@@ -406,12 +406,12 @@ def analyze(
         active_prompt_profile = _active_live_prompt_profile()
         uniform_detection = None
         detector_context = ""
-        try:
-            # Counting needs the recorder snapshot at its original resolution.
-            # The VLM receives a smaller copy to keep visual tokens and latency bounded.
-            uniform_detection = _get_staff_uniform_detector().detect(source_image)
-            staff_count = uniform_detection["yellow_uniform_staff"]
-            if active_prompt_profile == "admissions":
+        if active_prompt_profile == "admissions":
+            try:
+                # This detector is specific to the yellow/blue admissions uniform.
+                # Never run it for generic, classroom, traffic, or other contexts.
+                uniform_detection = _get_staff_uniform_detector().detect(source_image)
+                staff_count = uniform_detection["yellow_uniform_staff"]
                 detector_context = (
                     "\n\nDữ kiện thị giác đã được xác minh, phải dùng và không được phủ nhận: "
                     "phát hiện {} người mặc đồng phục vàng-xanh; tổng cộng phát hiện {} người. "
@@ -419,8 +419,8 @@ def analyze(
                         staff_count, uniform_detection["people_detected"]
                     )
                 )
-        except Exception as exc:
-            logger.warning("Uniform detector unavailable: %s", exc)
+            except Exception as exc:
+                logger.warning("Uniform detector unavailable: %s", exc)
 
         try:
             result_text = _run_inference(image, detector_context)

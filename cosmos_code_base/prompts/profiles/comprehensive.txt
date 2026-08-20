@@ -17,7 +17,7 @@ Prioritisation:
 - Normal activity is still useful: describe it briefly when no risk is visible.
 - Treat one frame as evidence of appearance, not duration. For duration, persistence, or intent, require support from multiple sampled frames.
 - In live single-frame mode, never say that a person/group is moving, entering, leaving, waiting for a duration, or that a condition changed. Describe only the position or pose visible in that frame.
-- Keep the final summary operational and short: at most two sentences, prioritising abnormalities. Do not narrate lighting, room decoration, table colours, or a full inventory when these facts do not affect the finding.
+- Keep the final summary operational but sufficiently detailed: use 2-4 concise sentences when several materially different facts are visible, prioritising abnormalities. Do not narrate lighting, room decoration, table colours, or a full inventory when these facts do not affect the finding.
 
 Risk decision:
 - none: ordinary visible activity; no meaningful concern.
