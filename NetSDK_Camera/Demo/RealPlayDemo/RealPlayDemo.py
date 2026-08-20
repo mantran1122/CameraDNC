@@ -12,8 +12,9 @@ from ctypes import POINTER, c_ubyte, cast, sizeof
 from PyQt5.QtCore import Qt, QSettings, QTimer, pyqtSignal
 from PyQt5.QtGui import QIntValidator
 from PyQt5.QtWidgets import (
-    QApplication, QCheckBox, QComboBox, QFrame, QGridLayout, QLabel, QMainWindow,
-    QMessageBox, QPlainTextEdit, QSizePolicy, QVBoxLayout, QPushButton,
+    QApplication, QCheckBox, QComboBox, QFormLayout, QFrame, QHBoxLayout, QLabel,
+    QMainWindow, QMessageBox, QPlainTextEdit, QSizePolicy, QSplitter, QVBoxLayout,
+    QPushButton,
 )
 
 from Demo.RealPlayDemo.RealPlayUI import Ui_MainWindow
@@ -70,8 +71,8 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
 
     def _init_ui(self):
         self.setWindowTitle('Xem camera trực tiếp')
-        self.setMinimumSize(960, 720)
-        self.resize(1180, 820)
+        self.setMinimumSize(980, 640)
+        self.resize(1280, 780)
         self.login_btn.setText('Đăng nhập')
         self.play_btn.setText('Bắt đầu xem')
         self.play_btn.setEnabled(False)
@@ -110,56 +111,86 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
         self.sample_timer.timeout.connect(self._request_snapshot)
 
     def _build_responsive_layout(self):
-        """Replace the generated fixed-position demo form with a resizable live workspace."""
+        """Build an operations-first camera workspace without absolute positioning."""
         layout = QVBoxLayout(self.centralwidget)
-        layout.setContentsMargins(18, 18, 18, 14)
-        layout.setSpacing(14)
+        layout.setContentsMargins(12, 12, 12, 10)
+        layout.setSpacing(10)
 
-        # The preview must not consume every spare pixel and push controls
-        # below the visible area on normal laptop displays.
-        self.PlayWnd.setMinimumHeight(300)
-        self.PlayWnd.setMaximumHeight(500)
+        self.header_panel = QFrame(self.centralwidget)
+        header = QHBoxLayout(self.header_panel)
+        header.setContentsMargins(14, 8, 14, 8)
+        self.header_title = QLabel('GIÁM SÁT TRỰC TIẾP', self.header_panel)
+        self.header_title.setStyleSheet('font-size: 15px; font-weight: 700;')
+        self.header_status = QLabel('Chưa kết nối đầu ghi', self.header_panel)
+        self.header_status.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        header.addWidget(self.header_title)
+        header.addStretch(1)
+        header.addWidget(self.header_status)
+        layout.addWidget(self.header_panel)
+
+        workspace = QSplitter(Qt.Horizontal, self.centralwidget)
+        workspace.setChildrenCollapsible(False)
+
+        self.connection_panel = QFrame(workspace)
+        connection_layout = QVBoxLayout(self.connection_panel)
+        connection_layout.setContentsMargins(14, 14, 14, 14)
+        connection_layout.setSpacing(10)
+        connection_title = QLabel('KẾT NỐI ĐẦU GHI', self.connection_panel)
+        connection_title.setStyleSheet('font-weight: 700;')
+        connection_layout.addWidget(connection_title)
+        connection_form = QFormLayout()
+        connection_form.setLabelAlignment(Qt.AlignLeft)
+        connection_form.setSpacing(8)
+        connection_form.addRow(self.IP_label, self.IP_lineEdit)
+        connection_form.addRow(self.Port_label, self.Port_lineEdit)
+        connection_form.addRow(self.Name_label, self.Name_lineEdit)
+        connection_form.addRow(self.Pwd_label, self.Pwd_lineEdit)
+        connection_layout.addLayout(connection_form)
+        connection_layout.addWidget(self.remember_check)
+        connection_layout.addWidget(self.login_btn)
+
+        device_title = QLabel('CAMERA ĐANG XEM', self.connection_panel)
+        device_title.setStyleSheet('font-weight: 700; margin-top: 10px;')
+        connection_layout.addWidget(device_title)
+        device_form = QFormLayout()
+        device_form.setSpacing(8)
+        device_form.addRow(self.Channel_label, self.Channel_comboBox)
+        device_form.addRow(self.label_5, self.StreamTyp_comboBox)
+        connection_layout.addLayout(device_form)
+        connection_layout.addWidget(self.play_btn)
+        connection_layout.addStretch(1)
+
+        self.video_panel = QFrame(workspace)
+        video_layout = QVBoxLayout(self.video_panel)
+        video_layout.setContentsMargins(10, 10, 10, 10)
+        video_layout.setSpacing(8)
+        self.PlayWnd.setMinimumSize(480, 300)
         self.PlayWnd.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         self.PlayWnd.setAlignment(Qt.AlignCenter)
-        layout.addWidget(self.PlayWnd, 0)
+        video_layout.addWidget(self.PlayWnd, 1)
+        self.video_caption = QLabel('Luồng trực tiếp từ đầu ghi', self.video_panel)
+        video_layout.addWidget(self.video_caption)
 
-        self.connection_panel = QFrame(self.centralwidget)
-        self.connection_panel.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
-        controls = QGridLayout(self.connection_panel)
-        controls.setContentsMargins(16, 14, 16, 14)
-        controls.setHorizontalSpacing(12)
-        controls.setVerticalSpacing(10)
-        controls.addWidget(self.IP_label, 0, 0)
-        controls.addWidget(self.IP_lineEdit, 0, 1, 1, 3)
-        controls.addWidget(self.Port_label, 0, 4)
-        controls.addWidget(self.Port_lineEdit, 0, 5)
-        controls.addWidget(self.login_btn, 0, 6, 2, 1)
-        controls.addWidget(self.Name_label, 1, 0)
-        controls.addWidget(self.Name_lineEdit, 1, 1, 1, 2)
-        controls.addWidget(self.Pwd_label, 1, 3)
-        controls.addWidget(self.Pwd_lineEdit, 1, 4, 1, 2)
-        controls.addWidget(self.remember_check, 2, 0, 1, 3)
-        controls.addWidget(self.Channel_label, 2, 3)
-        controls.addWidget(self.Channel_comboBox, 2, 4)
-        controls.addWidget(self.label_5, 2, 5)
-        controls.addWidget(self.StreamTyp_comboBox, 2, 6)
-        controls.addWidget(self.ai_check, 3, 0, 1, 4)
-        controls.addWidget(self.play_btn, 3, 5, 1, 2)
-        controls.addWidget(self.replay_event_combo, 4, 0, 1, 5)
-        controls.addWidget(self.replay_btn, 4, 5, 1, 2)
-        for column in (1, 2, 3):
-            controls.setColumnStretch(column, 1)
-        layout.addWidget(self.connection_panel)
-
-        self.ai_panel = QFrame(self.centralwidget)
-        self.ai_panel.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
+        self.ai_panel = QFrame(workspace)
         ai_layout = QVBoxLayout(self.ai_panel)
-        ai_layout.setContentsMargins(16, 12, 16, 12)
-        ai_layout.setSpacing(6)
+        ai_layout.setContentsMargins(14, 14, 14, 14)
+        ai_layout.setSpacing(10)
+        ai_title = QLabel('SỰ KIỆN AI', self.ai_panel)
+        ai_title.setStyleSheet('font-weight: 700;')
+        ai_layout.addWidget(ai_title)
+        ai_layout.addWidget(self.ai_check)
         ai_layout.addWidget(self.cosmos_label)
+        ai_layout.addWidget(self.replay_event_combo)
+        ai_layout.addWidget(self.replay_btn)
         ai_layout.addWidget(self.cosmos_log)
-        self.cosmos_log.setFixedHeight(96)
-        layout.addWidget(self.ai_panel)
+        workspace.addWidget(self.connection_panel)
+        workspace.addWidget(self.video_panel)
+        workspace.addWidget(self.ai_panel)
+        workspace.setStretchFactor(0, 0)
+        workspace.setStretchFactor(1, 1)
+        workspace.setStretchFactor(2, 0)
+        workspace.setSizes([260, 720, 290])
+        layout.addWidget(workspace, 1)
         self._apply_theme_styles()
 
     @staticmethod
@@ -200,6 +231,8 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
                 t.S2, t.BD, t.RADIUS_CARD, t.P1, t.SIDEBAR, t.P2, t.MONO
             )
         )
+        self.video_panel.setStyleSheet('background: {}; border: 1px solid {}; border-radius: {}px;'.format(t.S1, t.BD, t.RADIUS_CARD))
+        self.header_panel.setStyleSheet('background: {}; border: 1px solid {}; border-radius: {}px; color: {};'.format(t.TOPBAR, t.BD, t.RADIUS_CARD, t.P1))
 
     def _on_remember_toggled(self, checked):
         if not checked:
@@ -367,9 +400,11 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
     def _set_connection_state(self, connected):
         if connected:
             self.setWindowTitle('Xem trực tiếp - Trực tuyến')
+            self.header_status.setText('TRỰC TUYẾN')
             self.statusbar.showMessage('Đã kết nối đầu ghi')
         else:
             self.setWindowTitle('Xem trực tiếp - Mất kết nối')
+            self.header_status.setText('MẤT KẾT NỐI')
             self.statusbar.showMessage('Mất kết nối đầu ghi; SDK đang tự kết nối lại')
 
     def login_btn_onclick(self):
@@ -423,6 +458,7 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
         self.Channel_comboBox.clear()
         self._set_login_fields_enabled(True)
         self.setWindowTitle('Xem trực tiếp - Ngoại tuyến')
+        self.header_status.setText('NGOẠI TUYẾN')
         self.statusbar.showMessage('Đã đăng xuất')
 
     def play_btn_onclick(self):
