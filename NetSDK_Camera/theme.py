@@ -111,6 +111,7 @@ class TLight:
     RADIUS_CARD = T.RADIUS_CARD
     RADIUS_BTN  = T.RADIUS_BTN
     RADIUS_CHIP = T.RADIUS_CHIP
+    RADIUS_INPUT = T.RADIUS_INPUT
 
 
 # ══════════════════════════════════════════════════════════════════════
