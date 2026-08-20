@@ -15,3 +15,5 @@ openai
 lancedb
 sentence-transformers
 vllm
+fastapi
+uvicorn[standard]
