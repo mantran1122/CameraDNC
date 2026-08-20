@@ -261,10 +261,14 @@ class Launcher(QMainWindow):
             self._record_cosmos_autostart("No usable WSL distribution was detected.")
             return
         project_dir = os.getenv("COSMOS_WSL_PROJECT_DIR", "~/CameraDNC/cosmos_code_base")
+        prompt_profile = os.getenv("COSMOS_LIVE_PROMPT_PROFILE", "admissions").strip().lower()
+        if not re.fullmatch(r"[a-z_]+", prompt_profile):
+            prompt_profile = "admissions"
         command = (
             "cd " + project_dir + " && source .venv/bin/activate && "
             "export CUDA_HOME=/usr/local/cuda && "
-            "exec env VLLM_USE_FLASHINFER_SAMPLER=0 python live_service.py "
+            "exec env VLLM_USE_FLASHINFER_SAMPLER=0 COSMOS_LIVE_PROMPT_PROFILE="
+            + prompt_profile + " python live_service.py "
             "--host 0.0.0.0 --port 8765 --gpu-memory-utilization 0.55 "
             "--max-model-len 6144 --max-new-tokens 512 "
             "> cosmos.log 2>&1"

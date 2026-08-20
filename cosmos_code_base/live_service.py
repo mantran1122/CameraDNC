@@ -236,6 +236,17 @@ def _load_live_prompt() -> str:
     return _LIVE_PROMPT
 
 
+def _active_live_prompt_profile() -> str:
+    """Return the profile actually selected by the live service for diagnostics."""
+    prompts_dir = Path(__file__).resolve().parent / "prompts"
+    profile = os.getenv("COSMOS_LIVE_PROMPT_PROFILE", "admissions").strip().lower()
+    if profile == "admissions":
+        return "admissions"
+    if (prompts_dir / "profiles" / "{}.txt".format(profile)).exists():
+        return profile
+    return "generic"
+
+
 def _get_staff_uniform_detector():
     """Load OpenCV/YOLO only after vLLM is ready to avoid startup library conflicts."""
     global _staff_uniform_detector
@@ -334,8 +345,12 @@ app = FastAPI(title="Cosmos Live Service", version="1.0", lifespan=_lifespan)
 async def health():
     status, detail = _get_status()
     if status == "error":
-        return JSONResponse({"status": "error", "detail": detail})
-    return {"status": status}
+        return JSONResponse({
+            "status": "error",
+            "detail": detail,
+            "live_prompt_profile": _active_live_prompt_profile(),
+        })
+    return {"status": status, "live_prompt_profile": _active_live_prompt_profile()}
 
 
 @app.post("/shutdown")
