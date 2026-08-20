@@ -94,8 +94,8 @@
   font-size: 11px;
   font-weight: 600;
   color: var(--green);
-  background: var(--s1);
-  border: 1px solid var(--bd);
+  background: rgba(16, 185, 129, .12);
+  border: 1px solid rgba(16, 185, 129, .28);
   border-radius: 2px;
   padding: 2px 8px;
 }
@@ -132,7 +132,7 @@
 /* ── Action button (Windows flat style) ────────────────────────── */
 .pill-btn {
   --c-bg:      var(--accent);
-  --c-ink:     var(--bg);
+  --c-ink:     #ffffff;
   --c-icon-bg: rgba(255, 255, 255, 0.15);
 
   appearance: none;
@@ -218,12 +218,12 @@
 }
 .pill-btn--danger-sb:hover {
   filter: none;
-  --c-bg:   var(--sb-s3);
-  --c-ink:  var(--sb-p1);
-  border-color: var(--sb-bd2);
+  --c-bg:   rgba(196, 43, 28, 0.15);
+  --c-ink:  var(--sb-red);
+  border-color: rgba(239, 68, 68, 0.40);
 }
 .pill-btn--danger-sb:active {
-  --c-bg: var(--sb-s3);
+  --c-bg: rgba(196, 43, 28, 0.25);
 }
 
 /* ── Empty state ────────────────────────────────────────────────── */

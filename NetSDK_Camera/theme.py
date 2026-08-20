@@ -13,20 +13,39 @@ from PyQt5.QtGui import QColor, QFont
 # ══════════════════════════════════════════════════════════════════════
 class T:
     # ── Backgrounds / surfaces ────────────────────────────────────────
-    BG = S1 = S2 = S3 = S4 = SIDEBAR = TOPBAR = "#000000"
+    BG      = "#07111F"   # app root background — darkest navy
+    S1      = "#0B1828"   # surface 1: sidebar panels, inner blocks
+    S2      = "#101E32"   # surface 2: card default background
+    S3      = "#152438"   # surface 3: card hover, input focus bg
+    S4      = "#1A2D48"   # surface 4: card active/running
+    SIDEBAR = "#060D19"   # sidebar background (slightly darker than BG)
+    TOPBAR  = "#08101E"   # topbar + statusbar background
 
     # ── Borders ───────────────────────────────────────────────────────
-    BD = BD2 = BD3 = "#FFFFFF"
+    BD      = "#162030"   # border subtle — barely visible dividers
+    BD2     = "#1D3050"   # border medium — card outlines, inputs
+    BD3     = "#2A4570"   # border active — focus rings, hover states
 
     # ── Text ──────────────────────────────────────────────────────────
-    P1      = "#FFFFFF"   # primary text — titles, labels
-    P2 = P3 = "#FFFFFF"
+    P1      = "#E3EDFF"   # primary text — titles, labels
+    P2      = "#7A96BE"   # secondary text — descriptions, sub-labels
+    P3      = "#3A5470"   # muted text — meta, hints, placeholders
 
     # ── Status / feedback ─────────────────────────────────────────────
-    ACCENT = GREEN = AMBER = RED = "#FFFFFF"
+    ACCENT  = "#3B82F6"   # blue — primary interactive accent
+    GREEN   = "#10B981"   # emerald — running, success, ready
+    AMBER   = "#F59E0B"   # amber — running demo indicator, warnings
+    RED     = "#EF4444"   # red — error, exit danger
 
     # ── Demo category accents (per-card accent color) ─────────────────
-    CAT_DEVICE = CAT_CAMERA = CAT_CAMERA2 = CAT_ALARM = CAT_PLAYBACK = CAT_CONTROL = CAT_AI = CAT_TRAFFIC = "#FFFFFF"
+    CAT_DEVICE   = "#3B82F6"   # Thiết bị  — blue
+    CAT_CAMERA   = "#06B6D4"   # Camera    — cyan
+    CAT_CAMERA2  = "#8B5CF6"   # Camera (Chụp ảnh) — violet
+    CAT_ALARM    = "#F59E0B"   # Cảnh báo  — amber
+    CAT_PLAYBACK = "#A855F7"   # Playback  — purple
+    CAT_CONTROL  = "#64748B"   # Điều khiển — slate
+    CAT_AI       = "#10B981"   # AI        — emerald
+    CAT_TRAFFIC  = "#F43F5E"   # Giao thông — rose
 
     # ── Typography ────────────────────────────────────────────────────
     FONT = "Segoe UI"     # primary — Windows native, fallback Arial
@@ -52,19 +71,39 @@ class T:
 # ══════════════════════════════════════════════════════════════════════
 class TLight:
     # ── Backgrounds / surfaces ────────────────────────────────────────
-    BG = S1 = S2 = S3 = S4 = SIDEBAR = TOPBAR = "#FFFFFF"
+    BG      = "#F1F5F9"   # pale blue-grey
+    S1      = "#E8EEF6"   # slightly darker panel
+    S2      = "#FFFFFF"   # card background — pure white
+    S3      = "#EDF2F8"   # card hover
+    S4      = "#E2EAF4"   # card active
+    SIDEBAR = "#060D19"   # sidebar stays dark — same as dark theme
+    TOPBAR  = "#FFFFFF"   # topbar / statusbar white
 
     # ── Borders ───────────────────────────────────────────────────────
-    BD = BD2 = BD3 = "#000000"
+    BD      = "#CFD9E7"   # subtle border
+    BD2     = "#B4C8DA"   # medium border
+    BD3     = "#87A9C2"   # active / focus border
 
     # ── Text ──────────────────────────────────────────────────────────
-    P1 = P2 = P3 = "#000000"
+    P1      = "#0E1E30"   # near-black heading text
+    P2      = "#3B5E7A"   # secondary body text
+    P3      = "#6E8EA6"   # muted / placeholder text
 
     # ── Status / feedback ─────────────────────────────────────────────
-    ACCENT = GREEN = AMBER = RED = "#000000"
+    ACCENT  = "#2563EB"   # slightly richer blue for light backgrounds
+    GREEN   = "#059669"
+    AMBER   = "#D97706"
+    RED     = "#DC2626"
 
     # ── Card accent colors stay the same ──────────────────────────────
-    CAT_DEVICE = CAT_CAMERA = CAT_CAMERA2 = CAT_ALARM = CAT_PLAYBACK = CAT_CONTROL = CAT_AI = CAT_TRAFFIC = "#000000"
+    CAT_DEVICE   = "#2563EB"
+    CAT_CAMERA   = "#0891B2"
+    CAT_CAMERA2  = "#7C3AED"
+    CAT_ALARM    = "#D97706"
+    CAT_PLAYBACK = "#9333EA"
+    CAT_CONTROL  = "#475569"
+    CAT_AI       = "#059669"
+    CAT_TRAFFIC  = "#E11D48"
 
     # ── Typography / sizing — same as T ──────────────────────────────
     FONT        = T.FONT
@@ -349,11 +388,11 @@ def qss_btn_danger() -> str:
             font-family: '{T.FONT}';
         }}
         QPushButton:hover {{
-            background-color: {T.S3};
+            background-color: #2A0A0A;
             color: {T.RED};
             border-color: {T.RED}80;
         }}
-        QPushButton:pressed {{ background-color: {T.S3}; }}
+        QPushButton:pressed {{ background-color: #3A0808; }}
     """
 
 def qss_chip(accent: str) -> str:

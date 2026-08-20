@@ -25,16 +25,16 @@
   --p3: #767676;
 
   /* status */
-  --accent: #FFFFFF;
-  --green:  #FFFFFF;
-  --amber:  #FFFFFF;
-  --red:    #FFFFFF;
-  --slate:  #FFFFFF;
+  --accent: #0078D4;
+  --green:  #10B981;
+  --amber:  #F59E0B;
+  --red:    #EF4444;
+  --slate:  #767676;
 
   /* card */
   --card-shadow:       none;
   --card-shadow-hover: none;
-  --card-error-bg:     #000000;
+  --card-error-bg:     #2B1A1A;
 
   /* typography */
   --font: 'Segoe UI', Arial, sans-serif;
@@ -56,15 +56,15 @@
   --sb-p1:         #FFFFFF;
   --sb-p2:         #B0B0B0;
   --sb-p3:         #767676;
-  --sb-accent:     #FFFFFF;
-  --sb-accent-bg:  #000000;
-  --sb-accent-bd:  #FFFFFF;
-  --sb-active-bg:  #000000;
+  --sb-accent:     #0078D4;
+  --sb-accent-bg:  rgba(0, 120, 212, 0.14);
+  --sb-accent-bd:  rgba(0, 120, 212, 0.28);
+  --sb-active-bg:  rgba(0, 120, 212, 0.18);
   --sb-active-fg:  #FFFFFF;
   --sb-tip-bg:     #2B2B2B;
   --sb-tip-fg:     #FFFFFF;
   --sb-shadow:     0 8px 24px rgba(0,0,0,.50);
-  --sb-red:        #FFFFFF;
+  --sb-red:        #EF4444;
   --sb-w-open:     232px;
   --sb-w-shut:     64px;
 }
@@ -86,15 +86,15 @@ html[data-theme="light"] {
   --p2: #5A5A5A;
   --p3: #8A8A8A;
 
-  --accent: #000000;
-  --green:  #000000;
-  --amber:  #000000;
-  --red:    #000000;
-  --slate:  #000000;
+  --accent: #0078D4;
+  --green:  #107C10;
+  --amber:  #D97706;
+  --red:    #C42B1C;
+  --slate:  #767676;
 
   --card-shadow:       none;
   --card-shadow-hover: none;
-  --card-error-bg:     #FFFFFF;
+  --card-error-bg:     #FFF4F4;
 
   /* sidebar light overrides */
   --sb-bg:         #F3F3F3;
@@ -105,11 +105,11 @@ html[data-theme="light"] {
   --sb-p1:         #1A1A1A;
   --sb-p2:         #5A5A5A;
   --sb-p3:         #8A8A8A;
-  --sb-accent:     #000000;
-  --sb-accent-bg:  #FFFFFF;
-  --sb-accent-bd:  #000000;
-  --sb-active-bg:  #FFFFFF;
-  --sb-active-fg:  #000000;
+  --sb-accent:     #0078D4;
+  --sb-accent-bg:  rgba(0, 120, 212, 0.10);
+  --sb-accent-bd:  rgba(0, 120, 212, 0.22);
+  --sb-active-bg:  rgba(0, 120, 212, 0.12);
+  --sb-active-fg:  #003D6B;
   --sb-tip-bg:     #1A1A1A;
   --sb-tip-fg:     #FFFFFF;
   --sb-shadow:     0 8px 24px rgba(0,0,0,.12);
