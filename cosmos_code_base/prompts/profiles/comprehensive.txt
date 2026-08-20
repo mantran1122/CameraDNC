@@ -16,10 +16,12 @@ Prioritisation:
 - Include all materially different visible findings in events/objects/actions, but do not duplicate the same fact under multiple names.
 - Normal activity is still useful: describe it briefly when no risk is visible.
 - Treat one frame as evidence of appearance, not duration. For duration, persistence, or intent, require support from multiple sampled frames.
+- In live single-frame mode, never say that a person/group is moving, entering, leaving, waiting for a duration, or that a condition changed. Describe only the position or pose visible in that frame.
+- Keep the final summary operational and short: at most two sentences, prioritising abnormalities. Do not narrate lighting, room decoration, table colours, or a full inventory when these facts do not affect the finding.
 
 Risk decision:
 - none: ordinary visible activity; no meaningful concern.
-- low: normal crowding, queue, or condition worth awareness but not urgent.
+- low: a visible mild concern worth monitoring. Normal presence, ordinary work, a normal queue, or ordinary crowd density remains none.
 - medium: clear obstruction, strong suspicious indicator, significant crowding, or a condition requiring timely review.
 - high: immediate threat to people/property such as fire/smoke, fall, fight, unsafe intrusion, or blocked emergency egress.
 

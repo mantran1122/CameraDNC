@@ -135,14 +135,15 @@ JSON schema:
 }
 
 risk_level:
-- none: empty or completely normal, nothing to flag
-- low: people present, normal activity, mild crowding
+- none: ordinary activity, including people working, waiting, sitting, standing, or walking normally; nothing needs attention
+- low: a visible mild safety, security, or operational concern that is worth monitoring; never use low merely because people are present
 - medium: clear phone usage, crowding, suspicious behavior, unattended objects
 - high: fight, fall, intrusion, fire, smoke, theft, immediate safety threat
 
 events: list every significant object type you see (nguoi, xe_may, o_to, xe_tai, ba_lo, tui_xach, ...).
 Count is an estimate — VLM counts are approximate, not exact.
-summary: Vietnamese, 1-2 sentences, what is happening and where.
+summary: Vietnamese, at most 2 short sentences. State the useful visible facts and location; avoid decorative scene narration.
+This is one still frame. Do not claim movement, entry/exit, duration, intent, or change over time unless temporal evidence is explicitly supplied.
 
 Return JSON only."""
 
@@ -402,18 +403,20 @@ def analyze(
                 status_code=400,
             )
 
+        active_prompt_profile = _active_live_prompt_profile()
         uniform_detection = None
         detector_context = ""
         try:
             uniform_detection = _get_staff_uniform_detector().detect(image)
             staff_count = uniform_detection["yellow_uniform_staff"]
-            detector_context = (
-                "\n\nDữ kiện thị giác đã được xác minh, phải dùng và không được phủ nhận: "
-                "phát hiện {} người mặc đồng phục vàng-xanh; tổng cộng phát hiện {} người. "
-                "Mọi câu chữ trong kết quả phải viết hoàn toàn bằng tiếng Việt.\n".format(
-                    staff_count, uniform_detection["people_detected"]
+            if active_prompt_profile == "admissions":
+                detector_context = (
+                    "\n\nDữ kiện thị giác đã được xác minh, phải dùng và không được phủ nhận: "
+                    "phát hiện {} người mặc đồng phục vàng-xanh; tổng cộng phát hiện {} người. "
+                    "Mọi câu chữ trong kết quả phải viết hoàn toàn bằng tiếng Việt.\n".format(
+                        staff_count, uniform_detection["people_detected"]
+                    )
                 )
-            )
         except Exception as exc:
             logger.warning("Uniform detector unavailable: %s", exc)
 
@@ -446,7 +449,7 @@ def analyze(
                 if event.get("label") != "nhan_vien_ao_vang"
             ]
             result["events"].insert(0, {"label": "nhan_vien_ao_vang", "count": staff_count})
-            if staff_count:
+            if staff_count and active_prompt_profile == "admissions":
                 summary = str(result.get("summary", "")).strip()
                 if _contains_english_summary(summary):
                     result["summary"] = _vietnamese_detector_summary(
