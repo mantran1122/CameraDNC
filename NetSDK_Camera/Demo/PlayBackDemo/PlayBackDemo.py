@@ -328,7 +328,7 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
                  t.ACCENT, t.P1, t.RADIUS_BTN, t.S3, t.P3, t.P2, t.BD2, t.P1, t.ACCENT)
         self.connection_panel.setStyleSheet(panel_style)
         self.controls_panel.setStyleSheet(panel_style)
-        self.SelectDate_calendarWidget.setStyleSheet(
+        calendar_style = (
             'QCalendarWidget {{ background: {s2}; color: {p1}; border: 1px solid {bd2}; }} '
             'QCalendarWidget QWidget#qt_calendar_navigationbar {{ background: {s1}; border-bottom: 1px solid {bd}; }} '
             'QCalendarWidget QToolButton {{ color: {p1}; background: {s1}; border: none; padding: 5px; font-weight: 700; }} '
@@ -338,6 +338,7 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
             'QCalendarWidget QAbstractItemView {{ background: {s2}; color: {p1}; selection-background-color: {accent}; selection-color: {p1}; outline: 0; }} '
             'QCalendarWidget QAbstractItemView:disabled {{ color: {p3}; }}'
         ).format(s1=t.S1, s2=t.S2, s3=t.S3, p1=t.P1, p3=t.P3, bd=t.BD, bd2=t.BD2, accent=t.ACCENT)
+        self.SelectDate_calendarWidget.setStyleSheet(calendar_style)
         self.video_panel.setStyleSheet('background: {}; border: 1px solid {}; border-radius: {}px;'.format(t.S1, t.BD, t.RADIUS_CARD))
         self.header_panel.setStyleSheet('background: {}; border: 1px solid {}; border-radius: {}px; color: {};'.format(t.TOPBAR, t.BD, t.RADIUS_CARD, t.P1))
 
