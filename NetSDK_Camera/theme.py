@@ -40,9 +40,9 @@ class T:
     # ── Demo category accents (per-card accent color) ─────────────────
     CAT_DEVICE   = "#3B82F6"   # Thiết bị  — blue
     CAT_CAMERA   = "#06B6D4"   # Camera    — cyan
-    CAT_CAMERA2  = "#8B5CF6"   # Camera (Chụp ảnh) — violet
+    CAT_CAMERA2  = "#06B6D4"   # Camera (Chụp ảnh)
     CAT_ALARM    = "#F59E0B"   # Cảnh báo  — amber
-    CAT_PLAYBACK = "#A855F7"   # Playback  — purple
+    CAT_PLAYBACK = "#3B82F6"   # Playback
     CAT_CONTROL  = "#64748B"   # Điều khiển — slate
     CAT_AI       = "#10B981"   # AI        — emerald
     CAT_TRAFFIC  = "#F43F5E"   # Giao thông — rose
@@ -98,9 +98,9 @@ class TLight:
     # ── Card accent colors stay the same ──────────────────────────────
     CAT_DEVICE   = "#2563EB"
     CAT_CAMERA   = "#0891B2"
-    CAT_CAMERA2  = "#7C3AED"
+    CAT_CAMERA2  = "#0891B2"
     CAT_ALARM    = "#D97706"
-    CAT_PLAYBACK = "#9333EA"
+    CAT_PLAYBACK = "#2563EB"
     CAT_CONTROL  = "#475569"
     CAT_AI       = "#059669"
     CAT_TRAFFIC  = "#E11D48"

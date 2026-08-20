@@ -115,12 +115,16 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
         layout.setContentsMargins(18, 18, 18, 14)
         layout.setSpacing(14)
 
-        self.PlayWnd.setMinimumHeight(390)
-        self.PlayWnd.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        # The preview must not consume every spare pixel and push controls
+        # below the visible area on normal laptop displays.
+        self.PlayWnd.setMinimumHeight(300)
+        self.PlayWnd.setMaximumHeight(500)
+        self.PlayWnd.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         self.PlayWnd.setAlignment(Qt.AlignCenter)
-        layout.addWidget(self.PlayWnd, 1)
+        layout.addWidget(self.PlayWnd, 0)
 
         self.connection_panel = QFrame(self.centralwidget)
+        self.connection_panel.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
         controls = QGridLayout(self.connection_panel)
         controls.setContentsMargins(16, 14, 16, 14)
         controls.setHorizontalSpacing(12)
@@ -148,6 +152,7 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
         layout.addWidget(self.connection_panel)
 
         self.ai_panel = QFrame(self.centralwidget)
+        self.ai_panel.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
         ai_layout = QVBoxLayout(self.ai_panel)
         ai_layout.setContentsMargins(16, 12, 16, 12)
         ai_layout.setSpacing(6)

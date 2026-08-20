@@ -73,7 +73,7 @@ DEMOS: List[DemoItem] = [
         "Demo.CapturePicture.CaptureDemo", "CaptureDemo", "CaptureWnd",
         "fa-camera", "CP",
         "Chụp snapshot từ luồng camera hiện tại.",
-        "Camera", "#8B5CF6",
+        "Camera", "#06B6D4",
         ["chụp", "ảnh", "snapshot", "capture", "picture"],
     ),
     DemoItem(
@@ -89,7 +89,7 @@ DEMOS: List[DemoItem] = [
         "Demo.PlayBackDemo.PlayBackDemo", "PlayBackDemo", "MyMainWindow",
         "fa-play-circle", "PB",
         "Truy xuất và phát lại video đã được ghi trên thiết bị.",
-        "Playback", "#A855F7",
+        "Playback", "#3B82F6",
         ["playback", "xem lại", "video", "record", "replay"],
     ),
     DemoItem(
