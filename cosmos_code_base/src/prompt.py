@@ -1,4 +1,5 @@
 from functools import lru_cache
+import os
 from pathlib import Path
 
 
@@ -93,6 +94,11 @@ Return JSON only.
 
 def build_chunk_prompt(start_time: str, end_time: str) -> str:
     template = _load_prompt_template()
+    profile = os.getenv("COSMOS_CHUNK_PROMPT_PROFILE", "").strip().lower()
+    if profile:
+        profile_path = Path(__file__).resolve().parents[1] / "prompts" / "profiles" / "{}.txt".format(profile)
+        if profile_path.exists():
+            template += "\n\n" + profile_path.read_text(encoding="utf-8").strip()
     return template.replace("{START_TIME}", start_time).replace("{END_TIME}", end_time).strip()
 
 

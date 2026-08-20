@@ -1,0 +1,26 @@
+PROFILE: COMPREHENSIVE OBSERVATION
+
+Inspect every category that can be supported by visible evidence in this camera view. Do not limit the report to one alert type.
+
+Observation checklist:
+1. People: approximate count, entry/exit, direction of movement, waiting, sitting, standing, groups, queues, interactions, falls, and people remaining unusually still only when the sequence supports it.
+2. Objects: bags, boxes, parcels, luggage, vehicles, handheld devices, tools, smoke/fire indicators, and objects left without a nearby owner. Describe an object only when it is visible and relevant.
+3. Safety: blocked walkways/exits, crowd compression, fall, fight, fire/smoke, unsafe climbing, intrusion into a restricted-looking area, collision, or damaged/obstructed access.
+4. Security: forced entry, suspicious removal/exchange of an item, loitering near a protected area, vandalism, and abandoned object. Never claim a crime or intent without clear visual evidence; use "cần kiểm tra" for uncertainty.
+5. Operations: queue length, service counter availability, staff/customer interaction when roles are visually apparent, and any condition that disrupts normal flow.
+6. Environment: lighting failure, camera obstruction, heavy occlusion, blur, scene change, or visibility limitation that affects confidence.
+
+Prioritisation:
+- Always report life-safety evidence first: fire/smoke, fall, fight, medical-looking emergency, blocked exit.
+- Then report security-relevant evidence, then operational congestion, then normal visible activity.
+- Include all materially different visible findings in events/objects/actions, but do not duplicate the same fact under multiple names.
+- Normal activity is still useful: describe it briefly when no risk is visible.
+- Treat one frame as evidence of appearance, not duration. For duration, persistence, or intent, require support from multiple sampled frames.
+
+Risk decision:
+- none: ordinary visible activity; no meaningful concern.
+- low: normal crowding, queue, or condition worth awareness but not urgent.
+- medium: clear obstruction, strong suspicious indicator, significant crowding, or a condition requiring timely review.
+- high: immediate threat to people/property such as fire/smoke, fall, fight, unsafe intrusion, or blocked emergency egress.
+
+Use precise Vietnamese describing what is visible, where it occurs, and what changed. Never identify a person or infer age, gender, emotion, ethnicity, intent, or guilt.

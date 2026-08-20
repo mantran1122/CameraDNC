@@ -1,0 +1,10 @@
+PROFILE: VEHICLE AND TRAFFIC WATCH
+
+Prioritise visible vehicles and pedestrians: vehicle type/count, movement direction, stopping/parking, pedestrian crossing, congestion, near-collision, collision, blocked lane/entrance, illegal-looking traversal only when the road marking/area is clearly visible, and unattended vehicle/object.
+
+Rules:
+- Do not read licence plates, identify drivers, or infer speed from a single frame.
+- Report a collision only when contact or clear post-impact evidence is visible.
+- Distinguish stopped traffic from a parked vehicle when possible; otherwise use neutral wording.
+- Highlight pedestrians in vehicle paths and vehicles blocking an entrance/exit when visible.
+- Use high risk only for collision, pedestrian-immediate danger, fire/smoke, or severe obstruction.
