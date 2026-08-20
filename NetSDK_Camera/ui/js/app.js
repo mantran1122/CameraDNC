@@ -31,6 +31,7 @@ function toggleTheme() {
     document.documentElement.setAttribute('data-theme', next);
     localStorage.setItem('theme', next);
     _syncThemeIcon();
+    if (window.backend) { backend.set_theme(next); }
 }
 
 // ── Race-condition-safe init ────────────────────────────────────────────
@@ -48,6 +49,7 @@ new QWebChannel(qt.webChannelTransport, function(channel) {
     backend.demo_stopped.connect(onDemoStopped);
     backend.demo_error.connect(onDemoError);
     backend.app_status.connect(onStatusUpdate);
+    backend.set_theme(document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark');
     if (_appData) { _doInit(); }
 });
 

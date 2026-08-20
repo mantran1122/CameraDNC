@@ -9,7 +9,7 @@ from urllib import request as urlrequest
 from urllib.error import URLError, HTTPError
 from ctypes import POINTER, c_ubyte, cast, sizeof
 
-from PyQt5.QtCore import Qt, QTimer, pyqtSignal
+from PyQt5.QtCore import Qt, QSettings, QTimer, pyqtSignal
 from PyQt5.QtGui import QIntValidator
 from PyQt5.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QFrame, QGridLayout, QLabel, QMainWindow,
@@ -22,7 +22,7 @@ from NetSDK.SDK_Callback import fDisConnect, fHaveReConnect, fSnapRev
 from NetSDK.SDK_Enum import SDK_RealPlayType, EM_LOGIN_SPAC_CAP_TYPE
 from NetSDK.SDK_Struct import C_LLONG, SNAP_PARAMS, NET_IN_LOGIN_WITH_HIGHLEVEL_SECURITY, NET_OUT_LOGIN_WITH_HIGHLEVEL_SECURITY
 from connection_preferences import clear_connection, load_connection, save_connection
-from theme import T
+from theme import THEMES
 
 
 def _positive_float_from_env(name, default):
@@ -42,6 +42,7 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setupUi(self)
+        self._theme = THEMES[self._saved_theme_name()]
         self.loginID = C_LLONG()
         self.playID = C_LLONG()
         self.m_DisConnectCallBack = fDisConnect(self.DisConnectCallBack)
@@ -71,7 +72,6 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
         self.setWindowTitle('Xem camera trực tiếp')
         self.setMinimumSize(960, 720)
         self.resize(1180, 820)
-        self.centralwidget.setStyleSheet('background: {}; color: {};'.format(T.BG, T.P1))
         self.login_btn.setText('Đăng nhập')
         self.play_btn.setText('Bắt đầu xem')
         self.play_btn.setEnabled(False)
@@ -118,26 +118,10 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
         self.PlayWnd.setMinimumHeight(390)
         self.PlayWnd.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.PlayWnd.setAlignment(Qt.AlignCenter)
-        self.PlayWnd.setStyleSheet(
-            'background: {}; border: 1px solid {}; border-radius: {}px; color: {};'.format(
-                T.SIDEBAR, T.BD2, T.RADIUS_CARD, T.P2
-            )
-        )
         layout.addWidget(self.PlayWnd, 1)
 
-        connection_panel = QFrame(self.centralwidget)
-        connection_panel.setStyleSheet(
-            'QFrame {{ background: {}; border: 1px solid {}; border-radius: {}px; }} '
-            'QLabel {{ color: {}; font-weight: 600; }} '
-            'QLineEdit, QComboBox {{ background: {}; color: {}; border: 1px solid {}; border-radius: {}px; padding: 7px 9px; min-height: 22px; }} '
-            'QPushButton {{ background: {}; color: {}; border: none; border-radius: {}px; padding: 8px 16px; font-weight: 700; min-height: 24px; }} '
-            'QPushButton:disabled {{ background: {}; color: {}; }} '
-            'QCheckBox {{ color: {}; background: transparent; }}'.format(
-                T.S2, T.BD, T.RADIUS_CARD, T.P2, T.S1, T.P1, T.BD2, T.RADIUS_INPUT,
-                T.ACCENT, T.P1, T.RADIUS_BTN, T.S3, T.P3, T.P2
-            )
-        )
-        controls = QGridLayout(connection_panel)
+        self.connection_panel = QFrame(self.centralwidget)
+        controls = QGridLayout(self.connection_panel)
         controls.setContentsMargins(16, 14, 16, 14)
         controls.setHorizontalSpacing(12)
         controls.setVerticalSpacing(10)
@@ -161,23 +145,56 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
         controls.addWidget(self.replay_btn, 4, 5, 1, 2)
         for column in (1, 2, 3):
             controls.setColumnStretch(column, 1)
-        layout.addWidget(connection_panel)
+        layout.addWidget(self.connection_panel)
 
-        ai_panel = QFrame(self.centralwidget)
-        ai_panel.setStyleSheet(
-            'QFrame {{ background: {}; border: 1px solid {}; border-radius: {}px; }} '
-            'QLabel {{ color: {}; background: transparent; font-weight: 600; padding: 2px; }} '
-            'QPlainTextEdit {{ background: {}; color: {}; border: none; font-family: {}; padding: 4px; }}'.format(
-                T.S2, T.BD, T.RADIUS_CARD, T.P1, T.SIDEBAR, T.P2, T.MONO
-            )
-        )
-        ai_layout = QVBoxLayout(ai_panel)
+        self.ai_panel = QFrame(self.centralwidget)
+        ai_layout = QVBoxLayout(self.ai_panel)
         ai_layout.setContentsMargins(16, 12, 16, 12)
         ai_layout.setSpacing(6)
         ai_layout.addWidget(self.cosmos_label)
         ai_layout.addWidget(self.cosmos_log)
         self.cosmos_log.setFixedHeight(96)
-        layout.addWidget(ai_panel)
+        layout.addWidget(self.ai_panel)
+        self._apply_theme_styles()
+
+    @staticmethod
+    def _saved_theme_name():
+        value = str(QSettings('DNC', 'DahuaControlCenter').value('appearance/theme', 'dark')).lower()
+        return value if value in THEMES else 'dark'
+
+    def apply_theme(self, theme_name):
+        theme_name = str(theme_name).lower()
+        if theme_name not in THEMES:
+            return
+        self._theme = THEMES[theme_name]
+        self._apply_theme_styles()
+
+    def _apply_theme_styles(self):
+        t = self._theme
+        self.centralwidget.setStyleSheet('background: {}; color: {};'.format(t.BG, t.P1))
+        self.PlayWnd.setStyleSheet(
+            'background: {}; border: 1px solid {}; border-radius: {}px; color: {};'.format(
+                t.SIDEBAR, t.BD2, t.RADIUS_CARD, t.P2
+            )
+        )
+        self.connection_panel.setStyleSheet(
+            'QFrame {{ background: {}; border: 1px solid {}; border-radius: {}px; }} '
+            'QLabel {{ color: {}; font-weight: 600; }} '
+            'QLineEdit, QComboBox {{ background: {}; color: {}; border: 1px solid {}; border-radius: {}px; padding: 7px 9px; min-height: 22px; }} '
+            'QPushButton {{ background: {}; color: {}; border: none; border-radius: {}px; padding: 8px 16px; font-weight: 700; min-height: 24px; }} '
+            'QPushButton:disabled {{ background: {}; color: {}; }} '
+            'QCheckBox {{ color: {}; background: transparent; }}'.format(
+                t.S2, t.BD, t.RADIUS_CARD, t.P2, t.S1, t.P1, t.BD2, t.RADIUS_INPUT,
+                t.ACCENT, t.P1, t.RADIUS_BTN, t.S3, t.P3, t.P2
+            )
+        )
+        self.ai_panel.setStyleSheet(
+            'QFrame {{ background: {}; border: 1px solid {}; border-radius: {}px; }} '
+            'QLabel {{ color: {}; background: transparent; font-weight: 600; padding: 2px; }} '
+            'QPlainTextEdit {{ background: {}; color: {}; border: none; font-family: {}; padding: 4px; }}'.format(
+                t.S2, t.BD, t.RADIUS_CARD, t.P1, t.SIDEBAR, t.P2, t.MONO
+            )
+        )
 
     def _on_remember_toggled(self, checked):
         if not checked:

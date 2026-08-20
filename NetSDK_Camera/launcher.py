@@ -28,7 +28,7 @@ if sys.platform == "win32":
 from PyQt5.QtWidgets import QApplication, QMainWindow, QMessageBox
 from PyQt5.QtWebEngineWidgets import QWebEngineView, QWebEngineSettings
 from PyQt5.QtWebChannel import QWebChannel
-from PyQt5.QtCore import Qt, QUrl
+from PyQt5.QtCore import Qt, QSettings, QUrl
 from PyQt5.QtGui import QFont
 
 from bridge import Bridge
@@ -210,6 +210,17 @@ class Launcher(QMainWindow):
         self._view.load(QUrl(f"http://127.0.0.1:{port}/ui/"))
         self._view.loadFinished.connect(self._on_load_finished)
         threading.Thread(target=self._ensure_cosmos_running, daemon=True, name="cosmos-starter").start()
+
+    def set_theme(self, theme_name):
+        """Persist the Web UI theme and update a running native demo, if supported."""
+        theme_name = str(theme_name).lower()
+        if theme_name not in {"dark", "light"}:
+            return
+        settings = QSettings("DNC", "DahuaControlCenter")
+        settings.setValue("appearance/theme", theme_name)
+        settings.sync()
+        if self._active_window is not None and hasattr(self._active_window, "apply_theme"):
+            self._active_window.apply_theme(theme_name)
 
     def _cosmos_base_url(self):
         return self._cosmos_url.rsplit("/", 1)[0]

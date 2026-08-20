@@ -27,3 +27,7 @@ class Bridge(QObject):
     @pyqtSlot()
     def quit_app(self):
         self._launcher.close()
+
+    @pyqtSlot(str)
+    def set_theme(self, theme_name):
+        self._launcher.set_theme(theme_name)
