@@ -10,3 +10,5 @@ Guidelines:
 - A visible phone is relevant only when its use affects a safety-sensitive/service context or is a requested observation.
 
 Normal queues should be low risk or none; use medium only for a materially obstructed flow or clear service disruption.
+
+Use a zone-by-zone flow check: entrance/exit, aisle, waiting area, service point and accessible path when present. Report an approximate queue length only if countable; otherwise describe sparse, moderate, or dense flow. Distinguish a temporary cluster from sustained congestion using the sampled sequence, and do not claim a service delay if no queue or service point is visible.

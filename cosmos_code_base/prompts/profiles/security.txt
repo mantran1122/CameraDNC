@@ -9,3 +9,5 @@ Evidence rules:
 - Include camera obstruction, tampering-like movement, or sudden loss of view when visible.
 
 Escalate to high only for clear immediate security danger. Keep normal authorised movement as none or low.
+
+For every access-related observation, identify the boundary/object, describe the movement or handling that is visible, and state its relative location. Do not treat clothing, appearance, time of day, or being alone as suspicious. When the view does not show before/after context, request verification instead of asserting tailgating, unauthorised access, abandonment, theft, or tampering.

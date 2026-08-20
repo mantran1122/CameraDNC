@@ -8,3 +8,5 @@ Rules:
 - Distinguish stopped traffic from a parked vehicle when possible; otherwise use neutral wording.
 - Highlight pedestrians in vehicle paths and vehicles blocking an entrance/exit when visible.
 - Use high risk only for collision, pedestrian-immediate danger, fire/smoke, or severe obstruction.
+
+Scan roadway, gate/entrance, pedestrian path and stationary vehicles separately. For movement, state direction relative to the camera and use neutral wording if the route is unclear. A near-collision requires visibly converging paths or a clear evasive action across frames; otherwise record ordinary proximity only. Never infer violation, fault, intoxication, or driver behaviour without direct visible evidence.

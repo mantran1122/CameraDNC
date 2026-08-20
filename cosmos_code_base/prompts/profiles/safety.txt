@@ -8,4 +8,6 @@ Use a conservative evidence threshold:
 - Exit/walkway obstruction: state the object/group and whether passage appears materially impeded.
 - Fight: require visible physical aggression, not ordinary talking, gesturing, or a crowd.
 
+For each hazard, report hazard type, relative location, visible people exposed, and whether the route or space remains passable. Suggest only a practical next action supported by the image, such as inspecting, clearing the passage, notifying staff, or responding immediately. Do not diagnose injury, the cause of smoke, or severity beyond visible evidence.
+
 Put the hazard location and immediate recommended operational action in the Vietnamese description, such as "cần kiểm tra ngay". Do not invent medical conditions.
