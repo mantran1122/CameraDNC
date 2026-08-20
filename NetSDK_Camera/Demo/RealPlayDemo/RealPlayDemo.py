@@ -12,7 +12,7 @@ from ctypes import POINTER, c_ubyte, cast, sizeof
 from PyQt5.QtCore import Qt, QTimer, pyqtSignal
 from PyQt5.QtGui import QIntValidator
 from PyQt5.QtWidgets import (
-    QApplication, QCheckBox, QFrame, QGridLayout, QLabel, QMainWindow,
+    QApplication, QCheckBox, QComboBox, QFrame, QGridLayout, QLabel, QMainWindow,
     QMessageBox, QPlainTextEdit, QSizePolicy, QVBoxLayout, QPushButton,
 )
 
@@ -60,6 +60,7 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
         self._snap_serial = 0
         self._capture_times = {}
         self._last_replay = None
+        self._replay_events = []
         self._replay_windows = []
         self.cosmos_url = os.getenv('COSMOS_LIVE_URL', 'http://127.0.0.1:8765/analyze')
         self.cosmos_interval_seconds = _positive_float_from_env('COSMOS_SAMPLE_INTERVAL_SECONDS', 10)
@@ -86,7 +87,10 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
         self.ai_check = QCheckBox('Phân tích Cosmos (mỗi {} giây)'.format(int(self.cosmos_interval_seconds)), self.centralwidget)
         self.ai_check.setEnabled(False)
         self.ai_check.toggled.connect(self._on_ai_toggled)
-        self.replay_btn = QPushButton('Xem lại cảnh báo gần nhất', self.centralwidget)
+        self.replay_event_combo = QComboBox(self.centralwidget)
+        self.replay_event_combo.setEnabled(False)
+        self.replay_event_combo.setToolTip('Chọn một cảnh báo AI để xem lại đoạn ghi trên đầu ghi.')
+        self.replay_btn = QPushButton('Xem lại cảnh báo đã chọn', self.centralwidget)
         self.replay_btn.setEnabled(False)
         self.replay_btn.clicked.connect(self._open_last_replay)
         self.cosmos_label = QLabel('Cosmos: đã tắt', self.centralwidget)
@@ -152,8 +156,9 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
         controls.addWidget(self.label_5, 2, 5)
         controls.addWidget(self.StreamTyp_comboBox, 2, 6)
         controls.addWidget(self.ai_check, 3, 0, 1, 4)
-        controls.addWidget(self.replay_btn, 3, 4)
         controls.addWidget(self.play_btn, 3, 5, 1, 2)
+        controls.addWidget(self.replay_event_combo, 4, 0, 1, 5)
+        controls.addWidget(self.replay_btn, 4, 5, 1, 2)
         for column in (1, 2, 3):
             controls.setColumnStretch(column, 1)
         layout.addWidget(connection_panel)
@@ -269,12 +274,31 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
             result.get('risk_level', 'none').upper(), result.get('summary', 'Không có mô tả'),
             payload.get('inference_ms', '?'))
         self._last_replay = payload.get('replay')
-        self.replay_btn.setEnabled(bool(self._last_replay))
+        if self._last_replay:
+            self._add_replay_event(self._last_replay)
         self.cosmos_label.setText('Cosmos: đã nhận kết quả phân tích')
         self.cosmos_log.appendPlainText(text)
 
+    def _add_replay_event(self, replay):
+        """Keep a bounded, in-session list; the server retains the JSONL audit history."""
+        self._replay_events.insert(0, replay)
+        self.replay_event_combo.insertItem(0, self._replay_event_label(replay), replay)
+        while self.replay_event_combo.count() > 50:
+            self.replay_event_combo.removeItem(self.replay_event_combo.count() - 1)
+            self._replay_events.pop()
+        self.replay_event_combo.setCurrentIndex(0)
+        self.replay_event_combo.setEnabled(True)
+        self.replay_btn.setEnabled(True)
+
+    @staticmethod
+    def _replay_event_label(replay):
+        summary = ' '.join(str(replay.get('summary', '')).split())[:90]
+        return '{} | {} | {}'.format(
+            replay.get('event_time', ''), str(replay.get('risk_level', 'none')).upper(), summary or 'Không có mô tả'
+        )
+
     def _open_last_replay(self):
-        replay = self._last_replay
+        replay = self.replay_event_combo.currentData() or self._last_replay
         if not replay:
             return
         try:
