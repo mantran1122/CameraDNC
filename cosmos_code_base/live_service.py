@@ -395,8 +395,8 @@ def analyze(
         t0 = time.perf_counter()
 
         try:
-            image = Image.open(io.BytesIO(body)).convert("RGB")
-            image = _resize_for_live_inference(image)
+            source_image = Image.open(io.BytesIO(body)).convert("RGB")
+            image = _resize_for_live_inference(source_image)
         except Exception as exc:
             return JSONResponse(
                 {"status": "error", "detail": f"invalid image: {exc}"},
@@ -407,7 +407,9 @@ def analyze(
         uniform_detection = None
         detector_context = ""
         try:
-            uniform_detection = _get_staff_uniform_detector().detect(image)
+            # Counting needs the recorder snapshot at its original resolution.
+            # The VLM receives a smaller copy to keep visual tokens and latency bounded.
+            uniform_detection = _get_staff_uniform_detector().detect(source_image)
             staff_count = uniform_detection["yellow_uniform_staff"]
             if active_prompt_profile == "admissions":
                 detector_context = (
