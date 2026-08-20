@@ -14,8 +14,11 @@ from pathlib import Path
 from urllib.error import URLError
 from urllib.request import urlopen
 
-from PyQt5.QtWidgets import QApplication, QMainWindow, QMessageBox
-from PyQt5.QtCore import Qt, QDate, QDateTime, QThread, pyqtSignal
+from PyQt5.QtWidgets import (
+    QApplication, QFormLayout, QFrame, QHBoxLayout, QLabel, QMainWindow,
+    QMessageBox, QSizePolicy, QSplitter, QVBoxLayout,
+)
+from PyQt5.QtCore import Qt, QDate, QDateTime, QSettings, QThread, pyqtSignal
 from ctypes import *
 
 from Demo.PlayBackDemo.PlayBackUI import Ui_MainWindow
@@ -25,6 +28,7 @@ from NetSDK.SDK_Struct import NET_TIME, NET_RECORDFILE_INFO, NET_IN_PLAY_BACK_BY
     C_LLONG, C_DWORD, C_LDWORD, NET_IN_LOGIN_WITH_HIGHLEVEL_SECURITY, NET_OUT_LOGIN_WITH_HIGHLEVEL_SECURITY
 from NetSDK.SDK_Callback import fDisConnect, fHaveReConnect
 from connection_preferences import load_connection
+from theme import THEMES
 
 
 # 继承QThread
@@ -157,6 +161,7 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
         super(MyMainWindow, self).__init__(parent)
         wnd = self
         self.setupUi(self)
+        self._theme = THEMES[self._saved_theme_name()]
 
         # 界面初始化
         self._init_ui()
@@ -199,7 +204,8 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
 
         self.setWindowFlag(Qt.WindowMinimizeButtonHint)
         self.setWindowFlag(Qt.WindowCloseButtonHint)
-        self.setFixedSize(self.width(), self.height())
+        self.setMinimumSize(980, 640)
+        self.resize(1280, 780)
 
         self.Login_pushButton.clicked.connect(self.login_btn_onclick)
         self.PlayBack_pushbutton.clicked.connect(self.playback_btn_onclick)
@@ -211,6 +217,119 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
         self.Start_dateTimeEdit.dateChanged.connect(self._sync_selected_date)
         self.End_dateTimeEdit.dateChanged.connect(self._sync_selected_date)
         self.StreamTyp_comboBox.currentIndexChanged.connect(self.stream_comboBox_oncurrentIndexChanged)
+        self._build_workspace()
+
+    def _build_workspace(self):
+        """Replace generated absolute-position groups with a stable Playback workspace."""
+        for legacy_group in (self.groupBox, self.groupBox_2, self.groupBox_3):
+            legacy_group.hide()
+
+        layout = QVBoxLayout(self.centralwidget)
+        layout.setContentsMargins(12, 12, 12, 10)
+        layout.setSpacing(10)
+        self.header_panel = QFrame(self.centralwidget)
+        header = QHBoxLayout(self.header_panel)
+        header.setContentsMargins(14, 8, 14, 8)
+        self.header_title = QLabel('XEM LẠI TỪ ĐẦU GHI', self.header_panel)
+        self.header_title.setStyleSheet('font-size: 15px; font-weight: 700;')
+        self.header_status = QLabel('Ngoại tuyến', self.header_panel)
+        self.header_status.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        header.addWidget(self.header_title)
+        header.addStretch(1)
+        header.addWidget(self.header_status)
+        layout.addWidget(self.header_panel)
+
+        workspace = QSplitter(Qt.Horizontal, self.centralwidget)
+        workspace.setChildrenCollapsible(False)
+
+        self.connection_panel = QFrame(workspace)
+        connection_layout = QVBoxLayout(self.connection_panel)
+        connection_layout.setContentsMargins(14, 14, 14, 14)
+        connection_layout.setSpacing(10)
+        connection_title = QLabel('KẾT NỐI ĐẦU GHI', self.connection_panel)
+        connection_title.setStyleSheet('font-weight: 700;')
+        connection_layout.addWidget(connection_title)
+        connection_form = QFormLayout()
+        connection_form.setSpacing(8)
+        connection_form.addRow(self.label, self.IP_lineEdit)
+        connection_form.addRow(self.label_2, self.Port_lineEdit)
+        connection_form.addRow(self.label_3, self.Name_lineEdit)
+        connection_form.addRow(self.label_4, self.Pwd_lineEdit)
+        connection_layout.addLayout(connection_form)
+        connection_layout.addWidget(self.Login_pushButton)
+        connection_layout.addStretch(1)
+
+        self.video_panel = QFrame(workspace)
+        video_layout = QVBoxLayout(self.video_panel)
+        video_layout.setContentsMargins(10, 10, 10, 10)
+        self.PlayBackWnd.setMinimumSize(480, 300)
+        self.PlayBackWnd.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        self.PlayBackWnd.setAlignment(Qt.AlignCenter)
+        video_layout.addWidget(self.PlayBackWnd, 1)
+        self.video_caption = QLabel('Chọn thời gian và nhấn Phát để xem lại', self.video_panel)
+        video_layout.addWidget(self.video_caption)
+
+        self.controls_panel = QFrame(workspace)
+        controls_layout = QVBoxLayout(self.controls_panel)
+        controls_layout.setContentsMargins(14, 14, 14, 14)
+        controls_layout.setSpacing(9)
+        controls_title = QLabel('ĐIỀU KHIỂN XEM LẠI', self.controls_panel)
+        controls_title.setStyleSheet('font-weight: 700;')
+        controls_layout.addWidget(controls_title)
+        view_form = QFormLayout()
+        view_form.setSpacing(8)
+        view_form.addRow(self.Channel_label, self.Channel_comboBox)
+        view_form.addRow(self.label_5, self.StreamTyp_comboBox)
+        controls_layout.addLayout(view_form)
+        controls_layout.addWidget(self.SelectDate_calendarWidget)
+        controls_layout.addWidget(self.exist_radioButton)
+        time_form = QFormLayout()
+        time_form.setSpacing(8)
+        time_form.addRow(self.label_7, self.Start_dateTimeEdit)
+        time_form.addRow(self.label_8, self.End_dateTimeEdit)
+        controls_layout.addLayout(time_form)
+        buttons = QHBoxLayout()
+        buttons.addWidget(self.PlayBack_pushbutton)
+        buttons.addWidget(self.Pause_pushbutton)
+        controls_layout.addLayout(buttons)
+        controls_layout.addWidget(self.Download_pushButton)
+        controls_layout.addWidget(self.AnalyzeAI_pushButton)
+        controls_layout.addWidget(self.Download_progressBar)
+        controls_layout.addStretch(1)
+
+        workspace.addWidget(self.connection_panel)
+        workspace.addWidget(self.video_panel)
+        workspace.addWidget(self.controls_panel)
+        workspace.setStretchFactor(0, 0)
+        workspace.setStretchFactor(1, 1)
+        workspace.setStretchFactor(2, 0)
+        workspace.setSizes([250, 700, 310])
+        layout.addWidget(workspace, 1)
+        self._apply_theme_styles()
+
+    @staticmethod
+    def _saved_theme_name():
+        value = str(QSettings('DNC', 'DahuaControlCenter').value('appearance/theme', 'dark')).lower()
+        return value if value in THEMES else 'dark'
+
+    def _apply_theme_styles(self):
+        t = self._theme
+        self.centralwidget.setStyleSheet('background: {}; color: {};'.format(t.BG, t.P1))
+        panel_style = (
+            'QFrame {{ background: {}; border: 1px solid {}; border-radius: {}px; }} '
+            'QLabel {{ color: {}; font-weight: 600; }} '
+            'QLineEdit, QComboBox, QDateTimeEdit, QCalendarWidget {{ background: {}; color: {}; border: 1px solid {}; border-radius: {}px; padding: 6px; }} '
+            'QPushButton {{ background: {}; color: {}; border: none; border-radius: {}px; padding: 8px 12px; font-weight: 700; min-height: 22px; }} '
+            'QPushButton:disabled {{ background: {}; color: {}; }} '
+            'QRadioButton {{ color: {}; background: transparent; }} '
+            'QProgressBar {{ border: 1px solid {}; text-align: center; color: {}; }} '
+            'QProgressBar::chunk {{ background: {}; }}'
+        ).format(t.S2, t.BD, t.RADIUS_CARD, t.P2, t.S1, t.P1, t.BD2, t.RADIUS_INPUT,
+                 t.ACCENT, t.P1, t.RADIUS_BTN, t.S3, t.P3, t.P2, t.BD2, t.P1, t.ACCENT)
+        self.connection_panel.setStyleSheet(panel_style)
+        self.controls_panel.setStyleSheet(panel_style)
+        self.video_panel.setStyleSheet('background: {}; border: 1px solid {}; border-radius: {}px;'.format(t.S1, t.BD, t.RADIUS_CARD))
+        self.header_panel.setStyleSheet('background: {}; border: 1px solid {}; border-radius: {}px; color: {};'.format(t.TOPBAR, t.BD, t.RADIUS_CARD, t.P1))
 
     def configure_replay(self, host, port, username, password, channel, start_time, end_time):
         """Open an independent recorder Playback window for a live AI event."""
@@ -261,6 +380,7 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
             self.loginID, device_info, error_msg = self.sdk.LoginWithHighLevelSecurity(stuInParam, stuOutParam)
             if self.loginID != 0:
                 self.setWindowTitle('Xem lại video - Trực tuyến')
+                self.header_status.setText('TRỰC TUYẾN')
                 self.Login_pushButton.setText('Đăng xuất')
                 self.Download_pushButton.setEnabled(True)
                 self.Channel_comboBox.setEnabled(True)
@@ -285,6 +405,7 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
             result = self.sdk.Logout(self.loginID)
             if result:
                 self.setWindowTitle("Xem lại video - Ngoại tuyến")
+                self.header_status.setText('NGOẠI TUYẾN')
                 self.Login_pushButton.setText("Đăng nhập")
                 self.loginID = 0
                 self.StreamTyp_comboBox.setEnabled(False)
@@ -613,10 +734,12 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
     # 实现断线回调函数功能
     def DisConnectCallBack(self, lLoginID, pchDVRIP, nDVRPort, dwUser):
         self.setWindowTitle("Xem lại video - Ngoại tuyến")
+        self.header_status.setText('MẤT KẾT NỐI')
 
     # 实现断线重连回调函数功能
     def ReConnectCallBack(self, lLoginID, pchDVRIP, nDVRPort, dwUser):
         self.setWindowTitle('Xem lại video - Trực tuyến')
+        self.header_status.setText('TRỰC TUYẾN')
 
     # 关闭主窗口时清理资源
     def closeEvent(self, event):
