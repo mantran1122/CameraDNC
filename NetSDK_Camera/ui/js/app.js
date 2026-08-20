@@ -116,17 +116,17 @@ function createCard(demo, idx) {
     var card = document.createElement('div');
     card.className = 'demo-card' + (isRunning ? ' running' : '');
     card.setAttribute('data-module', demo.module_path);
-    card.style.setProperty('--card-accent', demo.accent);
+    card.style.setProperty('--card-accent', 'var(--accent)');
     card.style.animationDelay = (Math.min(idx, 7) * 0.03 + 0.03) + 's';
 
     card.innerHTML =
         '<div class="card-top">' +
-            '<div class="icon-box" style="background:' + demo.accent + '22;color:' + demo.accent + '">' +
+            '<div class="icon-box" style="background:var(--s1);color:var(--accent);border:1px solid var(--bd)">' +
                 '<i class="fas ' + demo.icon_key + '"></i>' +
             '</div>' +
             '<div class="card-badges">' +
                 '<span class="running-badge" style="display:' + (isRunning ? 'inline' : 'none') + '">RUNNING</span>' +
-                '<span class="cat-chip" style="color:' + demo.accent + ';background:' + demo.accent + '18;border:1px solid ' + demo.accent + '40">' + _esc(demo.category) + '</span>' +
+                '<span class="cat-chip" style="color:var(--accent);background:var(--s1);border:1px solid var(--bd)">' + _esc(demo.category) + '</span>' +
             '</div>' +
         '</div>' +
         '<div class="card-title">' + _esc(demo.label) + '</div>' +
