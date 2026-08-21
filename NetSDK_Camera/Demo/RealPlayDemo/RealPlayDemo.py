@@ -324,6 +324,9 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
             self._inference_inflight = False
 
     def _show_cosmos_result(self, payload):
+        if payload.get('duplicate'):
+            self.cosmos_label.setText('Cosmos: kết quả không đổi — đã bỏ qua cảnh báo trùng lặp')
+            return
         result = payload.get('result', {})
         text = '{} | {} | {} ms'.format(
             result.get('risk_level', 'none').upper(), result.get('summary', 'Không có mô tả'),

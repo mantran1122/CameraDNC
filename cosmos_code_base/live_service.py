@@ -45,6 +45,10 @@ _staff_uniform_detector = None
 # Đảm bảo không có 2 inference chạy cùng lúc
 _inference_lock = threading.Lock()
 
+# Last delivered analysis per camera. Consecutive identical results are
+# suppressed so one unchanged scene does not create alert spam.
+_last_live_result_fingerprints: dict[tuple[str, int | None], str] = {}
+
 
 def _event_log_path(captured_at: datetime) -> Path:
     """Return the daily JSONL audit file for live detections, never frames."""
@@ -67,6 +71,27 @@ def _should_record_event(risk_level: str) -> bool:
     levels = {"none": 0, "low": 1, "medium": 2, "high": 3}
     threshold = os.getenv("COSMOS_LIVE_EVENT_MIN_RISK", "low").strip().lower()
     return levels.get(risk_level.lower(), 0) >= levels.get(threshold, 1)
+
+
+def _is_duplicate_live_result(result: dict, device_id: str, channel: int | None) -> bool:
+    """Return True only when this camera's immediately previous result matches."""
+    normalized = {
+        "risk_level": str(result.get("risk_level", "none")).lower(),
+        "summary": " ".join(str(result.get("summary", "")).split()),
+        "events": sorted(
+            (
+                str(event.get("label", "")),
+                int(event.get("count", 0)),
+            )
+            for event in result.get("events", [])
+            if isinstance(event, dict)
+        ),
+    }
+    fingerprint = json.dumps(normalized, ensure_ascii=False, separators=(",", ":"))
+    key = (device_id or "unknown", channel)
+    duplicate = _last_live_result_fingerprints.get(key) == fingerprint
+    _last_live_result_fingerprints[key] = fingerprint
+    return duplicate
 
 
 def _record_live_event(result: dict, captured_at: datetime, device_id: str, channel: int | None) -> dict | None:
@@ -263,11 +288,21 @@ def _vietnamese_detector_summary(staff_count: int, risk_level: str) -> str:
     quantity = "nhiều" if staff_count > 1 else "một số"
     summary = "Phát hiện {} nhân viên mặc áo vàng tại khu vực tuyển sinh.".format(quantity)
     risk_text = {
-        "low": " Khu vực hơi đông nhưng chưa thấy nguy cơ rõ ràng.",
+        "low": " Hoạt động hỗ trợ tuyển sinh đang diễn ra; khu vực cần theo dõi thêm.",
         "medium": " Khu vực cần được kiểm tra do có dấu hiệu cần chú ý.",
         "high": " Có dấu hiệu rủi ro cao, cần kiểm tra ngay.",
     }.get(str(risk_level).lower(), " Hoạt động hỗ trợ tuyển sinh đang diễn ra bình thường.")
     return summary + risk_text
+
+
+def _vietnamese_admissions_summary(risk_level: str) -> str:
+    """Fallback for admissions frames where uniform presence is not confirmed."""
+    risk_text = {
+        "low": "Khu vực tuyển sinh có dấu hiệu cần theo dõi thêm.",
+        "medium": "Khu vực tuyển sinh cần được kiểm tra do có dấu hiệu cần chú ý.",
+        "high": "Khu vực tuyển sinh có dấu hiệu rủi ro cao, cần kiểm tra ngay.",
+    }.get(str(risk_level).lower(), "Hoạt động tại khu vực tuyển sinh đang diễn ra bình thường.")
+    return risk_text
 
 
 def _build_prompt_text(image: Image.Image, detector_context: str = "") -> str:
@@ -450,12 +485,22 @@ def analyze(
                     result.get("risk_level", "none"),
                 )
 
+        if active_prompt_profile == "admissions" and isinstance(result, dict):
+            has_uniform_staff = bool(
+                uniform_detection and uniform_detection.get("yellow_uniform_staff")
+            )
+            if not has_uniform_staff:
+                result["summary"] = _vietnamese_admissions_summary(
+                    result.get("risk_level", "none"),
+                )
+
         try:
             channel = int(x_cosmos_channel) if x_cosmos_channel is not None else None
         except ValueError:
             channel = None
         captured_at = _parse_capture_time(x_cosmos_captured_at)
-        replay = _record_live_event(result, captured_at, x_cosmos_device_id or "", channel)
+        duplicate = _is_duplicate_live_result(result, x_cosmos_device_id or "", channel)
+        replay = None if duplicate else _record_live_event(result, captured_at, x_cosmos_device_id or "", channel)
 
         return {
             "status": "ok",
@@ -464,6 +509,7 @@ def analyze(
             "result": result,
             "uniform_detection": uniform_detection,
             "replay": replay,
+            "duplicate": duplicate,
         }
 
     finally:
