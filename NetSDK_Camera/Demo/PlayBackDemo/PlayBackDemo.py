@@ -335,7 +335,7 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
         self.centralwidget.setStyleSheet('background: {}; color: {};'.format(t.BG, t.P1))
         panel_style = (
             'QFrame {{ background: {}; border: 1px solid {}; border-radius: {}px; }} '
-            'QLabel {{ color: {}; font-weight: 600; }} '
+            'QLabel {{ color: {}; background: transparent; border: none; font-weight: 600; }} '
             'QLineEdit, QComboBox, QDateTimeEdit, QCalendarWidget {{ background: {}; color: {}; border: 1px solid {}; border-radius: {}px; padding: 6px; }} '
             'QPushButton {{ background: {}; color: {}; border: none; border-radius: {}px; padding: 8px 12px; font-weight: 700; min-height: 22px; }} '
             'QPushButton:disabled {{ background: {}; color: {}; }} '
@@ -358,7 +358,7 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
         ).format(s1=t.S1, s2=t.S2, s3=t.S3, p1=t.P1, p3=t.P3, accent=t.ACCENT)
         self.SelectDate_calendarWidget.setStyleSheet(calendar_style)
         self.video_panel.setStyleSheet('background: {}; border: 1px solid {}; border-radius: {}px;'.format(t.S1, t.BD, t.RADIUS_CARD))
-        self.header_panel.setStyleSheet('background: {}; border: 1px solid {}; border-radius: {}px; color: {};'.format(t.TOPBAR, t.BD, t.RADIUS_CARD, t.P1))
+        self.header_panel.setStyleSheet('background: {}; border: none; color: {}; QLabel {{ background: transparent; border: none; }}'.format(t.TOPBAR, t.P1))
 
 
     def configure_replay(self, host, port, username, password, channel, start_time, end_time):

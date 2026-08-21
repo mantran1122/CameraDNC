@@ -215,7 +215,7 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
         )
         self.connection_panel.setStyleSheet(
             'QFrame {{ background: {}; border: 1px solid {}; border-radius: {}px; }} '
-            'QLabel {{ color: {}; font-weight: 600; }} '
+            'QLabel {{ color: {}; background: transparent; border: none; font-weight: 600; }} '
             'QLineEdit, QComboBox {{ background: {}; color: {}; border: 1px solid {}; border-radius: {}px; padding: 7px 9px; min-height: 22px; }} '
             'QPushButton {{ background: {}; color: {}; border: none; border-radius: {}px; padding: 8px 16px; font-weight: 700; min-height: 24px; }} '
             'QPushButton:disabled {{ background: {}; color: {}; }} '
@@ -226,13 +226,13 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
         )
         self.ai_panel.setStyleSheet(
             'QFrame {{ background: {}; border: 1px solid {}; border-radius: {}px; }} '
-            'QLabel {{ color: {}; background: transparent; font-weight: 600; padding: 2px; }} '
+            'QLabel {{ color: {}; background: transparent; border: none; font-weight: 600; padding: 2px; }} '
             'QPlainTextEdit {{ background: {}; color: {}; border: none; font-family: {}; padding: 4px; }}'.format(
                 t.S2, t.BD, t.RADIUS_CARD, t.P1, t.SIDEBAR, t.P2, t.MONO
             )
         )
         self.video_panel.setStyleSheet('background: {}; border: 1px solid {}; border-radius: {}px;'.format(t.S1, t.BD, t.RADIUS_CARD))
-        self.header_panel.setStyleSheet('background: {}; border: 1px solid {}; border-radius: {}px; color: {};'.format(t.TOPBAR, t.BD, t.RADIUS_CARD, t.P1))
+        self.header_panel.setStyleSheet('background: {}; border: none; color: {}; QLabel {{ background: transparent; border: none; }}'.format(t.TOPBAR, t.P1))
 
     def _on_remember_toggled(self, checked):
         if not checked:
