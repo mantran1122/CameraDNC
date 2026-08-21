@@ -249,15 +249,17 @@ def _load_model() -> None:
 def _load_live_prompt() -> str:
     prompts_dir = Path(__file__).resolve().parent / "prompts"
     profile = os.getenv("COSMOS_LIVE_PROMPT_PROFILE", "admissions").strip().lower()
-    if profile == "admissions":
-        prompt_path = prompts_dir / "live_admissions_prompt.txt"
-        if prompt_path.exists():
-            return prompt_path.read_text(encoding="utf-8").strip()
-        return _LIVE_PROMPT
-
     profile_path = prompts_dir / "profiles" / "{}.txt".format(profile)
     if profile_path.exists():
         return _LIVE_PROMPT + "\n\n" + profile_path.read_text(encoding="utf-8").strip()
+
+    # Compatibility only for existing installations that have not yet moved
+    # their admissions prompt into prompts/profiles/admissions.txt.
+    if profile == "admissions":
+        legacy_path = prompts_dir / "live_admissions_prompt.txt"
+        if legacy_path.exists():
+            logger.warning("Using legacy admissions prompt; migrate it to prompts/profiles/admissions.txt.")
+            return legacy_path.read_text(encoding="utf-8").strip()
     logger.warning("Unknown live prompt profile %r; using generic prompt.", profile)
     return _LIVE_PROMPT
 
