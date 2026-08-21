@@ -5,6 +5,14 @@
 ══════════════════════════════════════════════════════════════════ */
 
 /* ── Dark theme (default) ───────────────────────────────────────── */
+@font-face {
+  font-family: 'Momo Trust Sans';
+  src: url('../fonts/MomoTrustSans-Variable.ttf') format('truetype');
+  font-weight: 200 800;
+  font-style: normal;
+  font-display: swap;
+}
+
 :root {
   /* surfaces */
   --bg:     #1C1C1C;
@@ -37,7 +45,7 @@
   --card-error-bg:     #2B1A1A;
 
   /* typography */
-  --font: 'Segoe UI', Arial, sans-serif;
+  --font: 'Momo Trust Sans', 'Segoe UI', Arial, sans-serif;
   --mono: 'Courier New', monospace;
 
   /* radii */

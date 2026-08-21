@@ -29,7 +29,7 @@ from PyQt5.QtWidgets import QApplication, QMainWindow, QMessageBox
 from PyQt5.QtWebEngineWidgets import QWebEngineView, QWebEngineSettings
 from PyQt5.QtWebChannel import QWebChannel
 from PyQt5.QtCore import Qt, QSettings, QUrl
-from PyQt5.QtGui import QFont
+from PyQt5.QtGui import QFont, QFontDatabase
 
 from bridge import Bridge
 
@@ -442,7 +442,14 @@ class Launcher(QMainWindow):
 # ══════════════════════════════════════════════════════════════════════
 if __name__ == "__main__":
     app = QApplication(sys.argv)
-    app.setFont(QFont("Segoe UI", 10))
+    font_path = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        "ui", "fonts", "MomoTrustSans-Variable.ttf",
+    )
+    if QFontDatabase.addApplicationFont(font_path) >= 0:
+        app.setFont(QFont("Momo Trust Sans", 10))
+    else:
+        app.setFont(QFont("Segoe UI", 10))
     launcher = Launcher()
     launcher.show()
     sys.exit(app.exec_())

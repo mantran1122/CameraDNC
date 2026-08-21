@@ -16,7 +16,7 @@ from urllib.request import urlopen
 
 from PyQt5.QtWidgets import (
     QApplication, QFormLayout, QFrame, QHBoxLayout, QLabel, QMainWindow,
-    QMessageBox, QSizePolicy, QSplitter, QVBoxLayout,
+    QMessageBox, QPushButton, QSizePolicy, QSplitter, QVBoxLayout,
 )
 from PyQt5.QtCore import Qt, QDate, QDateTime, QSettings, QThread, pyqtSignal
 from ctypes import *
@@ -184,6 +184,10 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
 
         # demo内需要用到的变量
         self.pause_state = False
+        self._playback_cursor = None
+        self._playback_range_start = None
+        self._playback_range_end = None
+        self._playback_clock_started = None
         self.record_count = 0
         self.record_infos = NET_RECORDFILE_INFO * 5000
         self.download_mode = None
@@ -218,6 +222,9 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
         self.End_dateTimeEdit.dateChanged.connect(self._sync_selected_date)
         self.StreamTyp_comboBox.currentIndexChanged.connect(self.stream_comboBox_oncurrentIndexChanged)
         self._build_workspace()
+        self.seek_back_button.clicked.connect(lambda: self.seek_playback(-10))
+        self.seek_forward_button.clicked.connect(lambda: self.seek_playback(10))
+        self.stop_playback_button.clicked.connect(self.stop_playback)
 
     def _build_workspace(self):
         """Replace generated absolute-position groups with a stable Playback workspace."""
@@ -289,9 +296,20 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
         time_form.addRow(self.label_8, self.End_dateTimeEdit)
         controls_layout.addLayout(time_form)
         buttons = QHBoxLayout()
+        self.seek_back_button = QPushButton('‹ 10 giây', self.controls_panel)
+        self.seek_forward_button = QPushButton('10 giây ›', self.controls_panel)
+        self.stop_playback_button = QPushButton('Dừng', self.controls_panel)
+        self.seek_back_button.setToolTip('Tua lùi 10 giây')
+        self.seek_forward_button.setToolTip('Tua tới 10 giây')
+        self.seek_back_button.setEnabled(False)
+        self.seek_forward_button.setEnabled(False)
+        self.stop_playback_button.setEnabled(False)
+        buttons.addWidget(self.seek_back_button)
         buttons.addWidget(self.PlayBack_pushbutton)
         buttons.addWidget(self.Pause_pushbutton)
+        buttons.addWidget(self.seek_forward_button)
         controls_layout.addLayout(buttons)
+        controls_layout.addWidget(self.stop_playback_button)
         controls_layout.addWidget(self.Download_pushButton)
         controls_layout.addWidget(self.AnalyzeAI_pushButton)
         controls_layout.addWidget(self.Download_progressBar)
@@ -322,22 +340,22 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
             'QPushButton {{ background: {}; color: {}; border: none; border-radius: {}px; padding: 8px 12px; font-weight: 700; min-height: 22px; }} '
             'QPushButton:disabled {{ background: {}; color: {}; }} '
             'QRadioButton {{ color: {}; background: transparent; }} '
-            'QProgressBar {{ border: 1px solid {}; text-align: center; color: {}; }} '
+            'QProgressBar {{ border: none; text-align: center; color: {}; }} '
             'QProgressBar::chunk {{ background: {}; }}'
         ).format(t.S2, t.BD, t.RADIUS_CARD, t.P2, t.S1, t.P1, t.BD2, t.RADIUS_INPUT,
-                 t.ACCENT, t.P1, t.RADIUS_BTN, t.S3, t.P3, t.P2, t.BD2, t.P1, t.ACCENT)
+                 t.ACCENT, t.P1, t.RADIUS_BTN, t.S3, t.P3, t.P2, t.P1, t.ACCENT)
         self.connection_panel.setStyleSheet(panel_style)
         self.controls_panel.setStyleSheet(panel_style)
         calendar_style = (
-            'QCalendarWidget {{ background: {s2}; color: {p1}; border: 1px solid {bd2}; }} '
-            'QCalendarWidget QWidget#qt_calendar_navigationbar {{ background: {s1}; border-bottom: 1px solid {bd}; }} '
+            'QCalendarWidget {{ background: {s2}; color: {p1}; border: none; }} '
+            'QCalendarWidget QWidget#qt_calendar_navigationbar {{ background: {s1}; border: none; }} '
             'QCalendarWidget QToolButton {{ color: {p1}; background: {s1}; border: none; padding: 5px; font-weight: 700; }} '
             'QCalendarWidget QToolButton:hover {{ background: {s3}; }} '
             'QCalendarWidget QMenu {{ background: {s2}; color: {p1}; }} '
-            'QCalendarWidget QSpinBox {{ background: {s2}; color: {p1}; border: 1px solid {bd2}; }} '
+            'QCalendarWidget QSpinBox {{ background: {s2}; color: {p1}; border: none; }} '
             'QCalendarWidget QAbstractItemView {{ background: {s2}; color: {p1}; selection-background-color: {accent}; selection-color: {p1}; outline: 0; }} '
             'QCalendarWidget QAbstractItemView:disabled {{ color: {p3}; }}'
-        ).format(s1=t.S1, s2=t.S2, s3=t.S3, p1=t.P1, p3=t.P3, bd=t.BD, bd2=t.BD2, accent=t.ACCENT)
+        ).format(s1=t.S1, s2=t.S2, s3=t.S3, p1=t.P1, p3=t.P3, accent=t.ACCENT)
         self.SelectDate_calendarWidget.setStyleSheet(calendar_style)
         self.video_panel.setStyleSheet('background: {}; border: 1px solid {}; border-radius: {}px;'.format(t.S1, t.BD, t.RADIUS_CARD))
         self.header_panel.setStyleSheet('background: {}; border: 1px solid {}; border-radius: {}px; color: {};'.format(t.TOPBAR, t.BD, t.RADIUS_CARD, t.P1))
@@ -423,6 +441,9 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
                 self.StreamTyp_comboBox.setEnabled(False)
                 self.PlayBack_pushbutton.setEnabled(False)
                 self.Pause_pushbutton.setEnabled(False)
+                self.seek_back_button.setEnabled(False)
+                self.seek_forward_button.setEnabled(False)
+                self.stop_playback_button.setEnabled(False)
                 self.Download_pushButton.setEnabled(False)
                 self.Channel_comboBox.setEnabled(False)
                 self.StreamTyp_comboBox.setEnabled(False)
@@ -430,6 +451,11 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
                 self.exist_radioButton.setChecked(False)
                 self.PlayBack_pushbutton.setText("Xem lại")
                 self.Pause_pushbutton.setText("Tạm dừng")
+                self.pause_state = False
+                self._playback_cursor = None
+                self._playback_range_start = None
+                self._playback_range_end = None
+                self._playback_clock_started = None
                 self.Download_pushButton.setText("Tải xuống")
                 self.AnalyzeAI_pushButton.setEnabled(False)
                 self.PlayBackWnd.repaint()
@@ -517,37 +543,106 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
             nchannel = self.Channel_comboBox.currentIndex()
             self.playbackID = self.sdk.PlayBackByTimeEx2(self.loginID, nchannel, inParam, outParam)
             if self.playbackID != 0:
-                self.PlayBack_pushbutton.setText("Dừng")
+                if self._playback_range_start is None:
+                    self._playback_range_start = start
+                    self._playback_range_end = end
+                self._playback_cursor = start
+                self._playback_clock_started = time.monotonic()
+                self.pause_state = False
+                self.PlayBack_pushbutton.setText("Đang phát")
+                self.PlayBack_pushbutton.setEnabled(False)
                 self.Pause_pushbutton.setEnabled(True)
+                self.seek_back_button.setEnabled(True)
+                self.seek_forward_button.setEnabled(True)
+                self.stop_playback_button.setEnabled(True)
                 self.Channel_comboBox.setEnabled(False)
                 self.StreamTyp_comboBox.setEnabled(False)
                 self.SelectDate_calendarWidget.setEnabled(False)
+                self.video_caption.setText("Đang xem lại — dùng ‹ / › để tua 10 giây")
                 self.Channel_comboBox.repaint()
                 self.StreamTyp_comboBox.repaint()
                 self.PlayBackWnd.repaint()
             else:
                 QMessageBox.about(self, 'Thông báo', self.sdk.GetLastErrorMessage())
         else:
-            result = self.sdk.StopPlayBack(self.playbackID)
-            if result:
-                self.PlayBack_pushbutton.setText("Xem lại")
-                self.playbackID = 0
-                self.PlayBackWnd.repaint()
-                self.Pause_pushbutton.setText("Tạm dừng")
-                self.Pause_pushbutton.setEnabled(False)
-                self.Channel_comboBox.setEnabled(True)
-                self.StreamTyp_comboBox.setEnabled(True)
-                self.SelectDate_calendarWidget.setEnabled(True)
-            else:
-                    QMessageBox.about(self, 'Thông báo', self.sdk.GetLastErrorMessage())
+            self.stop_playback()
+
+    def _current_playback_time(self):
+        """Estimate the current recorder position between native seek requests."""
+        cursor = self._playback_cursor or self.Start_dateTimeEdit.dateTime()
+        if self._playback_clock_started is not None:
+            cursor = cursor.addMSecs(int((time.monotonic() - self._playback_clock_started) * 1000))
+        if self._playback_range_end is not None and cursor > self._playback_range_end:
+            return self._playback_range_end
+        return cursor
+
+    def _reset_playback_ui(self):
+        self.PlayBack_pushbutton.setText("Xem lại")
+        self.PlayBack_pushbutton.setEnabled(bool(self.loginID and self.record_count > 0))
+        self.PlayBackWnd.repaint()
+        self.Pause_pushbutton.setText("Tạm dừng")
+        self.Pause_pushbutton.setEnabled(False)
+        self.seek_back_button.setEnabled(False)
+        self.seek_forward_button.setEnabled(False)
+        self.stop_playback_button.setEnabled(False)
+        self.Channel_comboBox.setEnabled(True)
+        self.StreamTyp_comboBox.setEnabled(True)
+        self.SelectDate_calendarWidget.setEnabled(True)
+        self.video_caption.setText("Chọn thời gian và nhấn Xem lại để phát video")
+
+    def stop_playback(self):
+        """Stop playback completely and return the recorder controls to idle."""
+        if not self.playbackID:
+            return
+        result = self.sdk.StopPlayBack(self.playbackID)
+        if not result:
+            QMessageBox.about(self, 'Thông báo', self.sdk.GetLastErrorMessage())
+            return
+        self.playbackID = 0
+        self.pause_state = False
+        self._playback_cursor = None
+        self._playback_range_start = None
+        self._playback_range_end = None
+        self._playback_clock_started = None
+        self._reset_playback_ui()
+
+    def seek_playback(self, seconds):
+        """Restart recorder playback at a qualitative +/- 10-second position."""
+        if not self.playbackID or self._playback_range_start is None or self._playback_range_end is None:
+            return
+        current = self._current_playback_time()
+        target = current.addSecs(seconds)
+        if target < self._playback_range_start:
+            target = self._playback_range_start
+        elif target > self._playback_range_end:
+            target = self._playback_range_end
+        if target == current:
+            return
+        if not self.sdk.StopPlayBack(self.playbackID):
+            QMessageBox.about(self, 'Thông báo', self.sdk.GetLastErrorMessage())
+            return
+        self.playbackID = 0
+        self.pause_state = False
+        self._playback_cursor = target
+        self._playback_clock_started = None
+        self.Start_dateTimeEdit.blockSignals(True)
+        self.Start_dateTimeEdit.setDateTime(target)
+        self.Start_dateTimeEdit.blockSignals(False)
+        self.playback_btn_onclick()
 
     def pause_btn_onclick(self):
         if self.playbackID:
-            self.pause_state = not self.pause_state
-            result = self.sdk.PausePlayBack(self.playbackID, self.pause_state)
+            next_pause_state = not self.pause_state
+            result = self.sdk.PausePlayBack(self.playbackID, next_pause_state)
             if not result:
                 QMessageBox.about(self, 'Thông báo', self.sdk.GetLastErrorMessage())
                 return
+            if next_pause_state:
+                self._playback_cursor = self._current_playback_time()
+                self._playback_clock_started = None
+            else:
+                self._playback_clock_started = time.monotonic()
+            self.pause_state = next_pause_state
             if self.pause_state:
                 self.Pause_pushbutton.setText("Tiếp tục")
             else:

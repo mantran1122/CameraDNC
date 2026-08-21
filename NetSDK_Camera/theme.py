@@ -48,7 +48,7 @@ class T:
     CAT_TRAFFIC  = "#F43F5E"   # Giao thông — rose
 
     # ── Typography ────────────────────────────────────────────────────
-    FONT = "Segoe UI"     # primary — Windows native, fallback Arial
+    FONT = "Momo Trust Sans"  # primary — bundled with the launcher
     MONO = "Courier New"  # monospace — module paths, version strings
 
     # ── Sizing constants ──────────────────────────────────────────────

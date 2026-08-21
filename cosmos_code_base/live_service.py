@@ -258,24 +258,15 @@ def _get_staff_uniform_detector():
     return _staff_uniform_detector
 
 
-def _contains_english_summary(text: str) -> bool:
-    lowered = " " + text.lower() + " "
-    markers = (
-        " staff ", " wearing ", " visitors ", " desk ", " people ",
-        " assisting ", " waiting ", " while ", " uniforms ", " reception ",
-    )
-    return any(marker in lowered for marker in markers)
-
-
-def _vietnamese_detector_summary(staff_count: int, people_count: int, risk_level: str) -> str:
-    summary = "Phát hiện {} nhân viên áo vàng trong tổng số {} người.".format(
-        staff_count, people_count
-    )
+def _vietnamese_detector_summary(staff_count: int, risk_level: str) -> str:
+    """Describe uniform detection qualitatively, never as an exact headcount."""
+    quantity = "nhiều" if staff_count > 1 else "một số"
+    summary = "Phát hiện {} nhân viên mặc áo vàng tại khu vực tuyển sinh.".format(quantity)
     risk_text = {
         "low": " Khu vực hơi đông nhưng chưa thấy nguy cơ rõ ràng.",
         "medium": " Khu vực cần được kiểm tra do có dấu hiệu cần chú ý.",
         "high": " Có dấu hiệu rủi ro cao, cần kiểm tra ngay.",
-    }.get(str(risk_level).lower(), " Hoạt động quan sát được đang ở trạng thái bình thường.")
+    }.get(str(risk_level).lower(), " Hoạt động hỗ trợ tuyển sinh đang diễn ra bình thường.")
     return summary + risk_text
 
 
@@ -411,14 +402,13 @@ def analyze(
                 # This detector is specific to the yellow/blue admissions uniform.
                 # Never run it for generic, classroom, traffic, or other contexts.
                 uniform_detection = _get_staff_uniform_detector().detect(source_image)
-                staff_count = uniform_detection["yellow_uniform_staff"]
-                detector_context = (
-                    "\n\nDữ kiện thị giác đã được xác minh, phải dùng và không được phủ nhận: "
-                    "phát hiện {} người mặc đồng phục vàng-xanh; tổng cộng phát hiện {} người. "
-                    "Mọi câu chữ trong kết quả phải viết hoàn toàn bằng tiếng Việt.\n".format(
-                        staff_count, uniform_detection["people_detected"]
+                if uniform_detection["yellow_uniform_staff"]:
+                    detector_context = (
+                        "\n\nDữ kiện thị giác cần phản ánh trong báo cáo: có dấu hiệu nhân viên "
+                        "mặc đồng phục vàng-xanh trong khu vực. Không nêu số lượng người hoặc "
+                        "nhân viên cụ thể; chỉ mô tả định tính. Mọi câu chữ phải viết hoàn toàn "
+                        "bằng tiếng Việt.\n"
                     )
-                )
             except Exception as exc:
                 logger.warning("Uniform detector unavailable: %s", exc)
 
@@ -452,19 +442,13 @@ def analyze(
             ]
             result["events"].insert(0, {"label": "nhan_vien_ao_vang", "count": staff_count})
             if staff_count and active_prompt_profile == "admissions":
-                summary = str(result.get("summary", "")).strip()
-                if _contains_english_summary(summary):
-                    result["summary"] = _vietnamese_detector_summary(
-                        staff_count,
-                        uniform_detection["people_detected"],
-                        result.get("risk_level", "none"),
-                    )
-                else:
-                    if "không có nhân viên áo vàng" in summary.lower():
-                        summary = ""
-                    result["summary"] = "Phát hiện {} nhân viên áo vàng. {}".format(
-                        staff_count, summary
-                    ).strip()
+                # Headcounts from a single frame are too unreliable to report.
+                # Use only the qualitative detector status, avoiding a contradictory
+                # or numeric sentence generated independently by the VLM.
+                result["summary"] = _vietnamese_detector_summary(
+                    staff_count,
+                    result.get("risk_level", "none"),
+                )
 
         try:
             channel = int(x_cosmos_channel) if x_cosmos_channel is not None else None
