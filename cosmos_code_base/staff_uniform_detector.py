@@ -1,4 +1,9 @@
-"""Person-first yellow/blue uniform detection for the admissions live camera."""
+"""Person-first yellow/blue uniform detection.
+
+``detect`` remains a compatibility adapter for the existing admissions service.
+Stateful camera pipelines must use ``detect_people`` and track each candidate,
+never use a single-frame count as their source of truth.
+"""
 from __future__ import annotations
 
 import os
@@ -41,7 +46,14 @@ class YellowUniformDetector:
         total = float(torso.shape[0] * torso.shape[1])
         return float(np.count_nonzero(yellow) / total), float(np.count_nonzero(blue) / total)
 
-    def detect(self, image: Image.Image) -> dict[str, Any]:
+    def detect_people(self, image: Image.Image) -> list[dict[str, Any]]:
+        """Return one colour-scored candidate per detected person.
+
+        Bounding boxes use pixel coordinates in ``[x1, y1, x2, y2]`` order.
+        ``is_yellow_uniform_candidate`` is deliberately only a frame-level hint:
+        the pilot tracker aggregates the scores over time before assigning staff
+        presence to a desk.
+        """
         rgb = np.asarray(image)
         bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
         result = self._get_model().predict(
@@ -53,25 +65,44 @@ class YellowUniformDetector:
             verbose=False,
         )[0]
 
-        people = 0
-        yellow_staff = 0
         yellow_min = float(os.getenv("STAFF_YELLOW_RATIO", "0.055"))
         blue_min = float(os.getenv("STAFF_BLUE_RATIO", "0.003"))
         yellow_only_min = float(os.getenv("STAFF_YELLOW_ONLY_RATIO", "0.16"))
-        for x1, y1, x2, y2 in result.boxes.xyxy.cpu().numpy().astype(int):
+        boxes = result.boxes.xyxy.cpu().numpy()
+        confidences = result.boxes.conf.cpu().numpy()
+        candidates: list[dict[str, Any]] = []
+        for box, confidence in zip(boxes, confidences):
+            x1, y1, x2, y2 = box.astype(int)
             x1, y1 = max(0, x1), max(0, y1)
             x2, y2 = min(bgr.shape[1], x2), min(bgr.shape[0], y2)
             if x2 - x1 < 10 or y2 - y1 < 20:
                 continue
-            people += 1
             yellow_ratio, blue_ratio = self._uniform_scores(bgr[y1:y2, x1:x2])
-            if yellow_ratio >= yellow_min and (
+            is_yellow = yellow_ratio >= yellow_min and (
                 blue_ratio >= blue_min or yellow_ratio >= yellow_only_min
-            ):
-                yellow_staff += 1
+            )
+            candidates.append(
+                {
+                    "bbox": [int(x1), int(y1), int(x2), int(y2)],
+                    "confidence": float(confidence),
+                    "yellow_score": yellow_ratio,
+                    "blue_score": blue_ratio,
+                    "is_yellow_uniform_candidate": is_yellow,
+                }
+            )
+        return candidates
+
+    def detect(self, image: Image.Image) -> dict[str, Any]:
+        """Return legacy single-frame aggregate for the admissions endpoint."""
+        candidates = self.detect_people(image)
+        yellow_staff = sum(
+            bool(candidate["is_yellow_uniform_candidate"])
+            for candidate in candidates
+        )
 
         return {
-            "people_detected": people,
+            "people_detected": len(candidates),
             "yellow_uniform_staff": yellow_staff,
             "method": "yolo_person_upper_body_colour",
+            "people": candidates,
         }

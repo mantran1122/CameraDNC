@@ -17,3 +17,4 @@ sentence-transformers
 vllm
 fastapi
 uvicorn[standard]
+PyYAML>=6.0
