@@ -11,13 +11,14 @@ NetSDK live stream -> đoạn DAV tạm -> FFmpeg (WAV 16 kHz) -> POST /transcri
 - Camera/đầu ghi phải bật audio cho kênh đang xem và phía vận hành phải cho phép xử lý audio.
 - Máy chạy `NetSDK_Camera` cần có `ffmpeg` trong `PATH`.
 - `live_service.py` cần chạy ở máy GPU, có `transformers` và quyền tải model
-  `openai/whisper-base` lần đầu.
+  `openai/whisper-small` lần đầu.
 
 ## Chạy service
 
 ```bash
 export COSMOS_LIVE_PROMPT_PROFILE=admissions
 export COSMOS_AUDIO_LANGUAGE=vi
+export COSMOS_AUDIO_MIN_RMS=0.003
 python live_service.py --host 0.0.0.0 --port 8766 --gpu-memory-utilization 0.55
 ```
 
@@ -36,6 +37,11 @@ Trong **Xem camera trực tiếp**, bật cả hai ô: **Phân tích Cosmos** v�
 
 Nút biểu tượng loa dưới khung video bật/tắt âm thanh nghe trực tiếp qua NetSDK.
 Nút này độc lập với ô chuyển lời nói thành văn bản.
+
+Service bỏ qua đoạn gần im lặng và transcript bị lặp bất thường để tránh Whisper
+tạo các câu giả như "Cảm ơn các bạn" lặp nhiều lần. Có thể tăng
+`COSMOS_AUDIO_MIN_RMS` nếu camera có nhiễu nền liên tục, hoặc giảm nhẹ nếu giọng
+nói ở xa bị bỏ qua.
 
 Mặc định app ghi một đoạn ngắn trực tiếp từ `playID` NetSDK đang mở. Vì vậy
 không cần public/NAT cổng RTSP 554. Đoạn DAV tạm được xóa ngay sau khi FFmpeg

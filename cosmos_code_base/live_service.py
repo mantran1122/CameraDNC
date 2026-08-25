@@ -13,6 +13,7 @@ import io
 import json
 import logging
 import os
+import re
 import signal
 import tempfile
 import threading
@@ -295,7 +296,7 @@ def _get_audio_transcriber():
         import torch
         from transformers import AutoModelForSpeechSeq2Seq, AutoProcessor, pipeline
 
-        model_id = os.getenv("COSMOS_AUDIO_MODEL", "openai/whisper-base").strip()
+        model_id = os.getenv("COSMOS_AUDIO_MODEL", "openai/whisper-small").strip()
         use_cuda = torch.cuda.is_available()
         dtype = torch.float16 if use_cuda else torch.float32
         model = AutoModelForSpeechSeq2Seq.from_pretrained(
@@ -317,6 +318,37 @@ def _get_audio_transcriber():
             max_new_tokens=128,
         )
     return _audio_transcriber
+
+
+def _pcm16_wav_rms(body: bytes) -> float:
+    """Estimate normalized RMS from the PCM16 WAV emitted by the camera client."""
+    import numpy as np
+
+    marker = body.find(b"data")
+    offset = marker + 8 if marker >= 0 else 44
+    pcm = body[offset:]
+    if len(pcm) < 2:
+        return 0.0
+    if len(pcm) % 2:
+        pcm = pcm[:-1]
+    samples = np.frombuffer(pcm, dtype="<i2").astype(np.float32)
+    if samples.size == 0:
+        return 0.0
+    return float(np.sqrt(np.mean(np.square(samples / 32768.0))))
+
+
+def _is_repetitive_transcript(text: str) -> bool:
+    """Reject common Whisper loops produced from silence and stationary noise."""
+    tokens = re.findall(r"\w+", text.casefold(), flags=re.UNICODE)
+    if len(tokens) < 8:
+        return False
+    if len(set(tokens)) / len(tokens) < 0.30:
+        return True
+    for period in range(1, min(7, len(tokens) // 3 + 1)):
+        matches = sum(tokens[index] == tokens[index - period] for index in range(period, len(tokens)))
+        if matches / (len(tokens) - period) >= 0.72:
+            return True
+    return False
 
 
 def _vietnamese_detector_summary(staff_count: int, risk_level: str) -> str:
@@ -579,12 +611,38 @@ def transcribe(
             output.write(body)
             wav_path = output.name
         t0 = time.perf_counter()
+        try:
+            min_rms = max(0.0, float(os.getenv("COSMOS_AUDIO_MIN_RMS", "0.003")))
+        except ValueError:
+            min_rms = 0.003
+        rms = _pcm16_wav_rms(body)
+        if rms < min_rms:
+            return {
+                "status": "ok",
+                "timestamp": datetime.now().astimezone().isoformat(timespec="seconds"),
+                "captured_at": _parse_capture_time(x_cosmos_captured_at).isoformat(timespec="seconds"),
+                "transcription_ms": 0,
+                "text": "",
+                "speech_detected": False,
+                "ignored_reason": "low_audio_energy",
+                "audio_rms": round(rms, 6),
+            }
         language = os.getenv("COSMOS_AUDIO_LANGUAGE", "vi").strip() or None
-        generate_kwargs = {"task": "transcribe"}
+        generate_kwargs = {
+            "task": "transcribe",
+            "do_sample": False,
+            "num_beams": 1,
+            "repetition_penalty": 1.15,
+            "no_repeat_ngram_size": 3,
+        }
         if language:
             generate_kwargs["language"] = language
         result = _get_audio_transcriber()(wav_path, generate_kwargs=generate_kwargs)
         text = " ".join(str(result.get("text", "")).split())
+        repetitive = _is_repetitive_transcript(text)
+        if repetitive:
+            logger.info("Suppressed repetitive audio transcription for device=%s channel=%s", x_cosmos_device_id, x_cosmos_channel)
+            text = ""
         return {
             "status": "ok",
             "timestamp": datetime.now().astimezone().isoformat(timespec="seconds"),
@@ -593,6 +651,9 @@ def transcribe(
             "captured_at": _parse_capture_time(x_cosmos_captured_at).isoformat(timespec="seconds"),
             "transcription_ms": int((time.perf_counter() - t0) * 1000),
             "text": text,
+            "speech_detected": bool(text),
+            "ignored_reason": "repetitive_transcript" if repetitive else None,
+            "audio_rms": round(rms, 6),
         }
     except Exception as exc:
         logger.exception("Audio transcription failed")

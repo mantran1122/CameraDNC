@@ -591,7 +591,10 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
         self.cosmos_log.appendPlainText(text)
 
     def _show_audio_result(self, payload):
-        text = str(payload.get('text', '')).strip() or '[Không nhận diện được lời nói rõ ràng]'
+        text = str(payload.get('text', '')).strip()
+        if not payload.get('speech_detected', bool(text)):
+            self.audio_label.setText('Tiếng nói: chưa có lời nói rõ ràng')
+            return
         self.audio_label.setText('Tiếng nói: đã nhận văn bản')
         self.audio_log.appendPlainText('{} | {} ms\n{}'.format(
             payload.get('captured_at', ''), payload.get('transcription_ms', '?'), text
