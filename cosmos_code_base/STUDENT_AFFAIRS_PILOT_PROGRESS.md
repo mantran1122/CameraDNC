@@ -37,16 +37,25 @@ engine xác minh; không dùng VLM để tự đếm người hoặc suy luận 
    - Thêm profile `student_affairs`, quy định chỉ diễn giải facts đã xác minh.
    - Bổ sung PyYAML để đọc camera profile.
 
+5. Tracker theo camera
+   - Thêm `student_affairs/tracker.py`: tracker in-memory riêng cho mỗi `camera_id`,
+     gán ID theo IoU/khoảng cách và loại track hết hạn theo thời gian.
+   - Tách `CameraTrackerRegistry` để không bao giờ dùng chung state giữa hai camera.
+
+6. Kiểm thử offline
+   - Thêm `student_affairs/offline.py`: CLI đọc video ghi sẵn, chạy detector → tracker
+     → rule engine và xuất MP4 overlay `track_id`/zone/trạng thái cùng JSONL event tuỳ chọn.
+
 ## Kiểm thử đã chạy
 
-`python -m unittest tests.test_student_affairs_rules tests.test_student_affairs_detector`
+`python -m unittest tests.test_student_affairs_rules tests.test_student_affairs_detector tests.test_student_affairs_tracker`
 
-Kết quả: 4/4 test đạt. Các test bao phủ ngưỡng báo vắng, chống lặp alert, bàn
-có nhân viên, scene-change và dữ liệu detector cho từng người.
+Test bao phủ ngưỡng báo vắng, chống lặp alert, bàn có nhân viên, scene-change,
+dữ liệu detector, giữ ID khi di chuyển nhẹ, hết hạn track, cách ly state giữa camera
+và pipeline/overlay offline.
 
 ## Việc tiếp theo
 
-- Thêm tracker độc lập cho từng camera và ổn định `track_id` qua che khuất ngắn.
 - Xây state machine qua cửa: chỉ xác nhận `outside` khi có chuỗi bằng chứng;
   mất track giữa phòng chỉ ghi `uncertain_lost_track`.
 - Tạo endpoint pilot nhận frame và trả JSON contract; giữ `/analyze` hiện tại

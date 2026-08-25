@@ -16,7 +16,7 @@
 ### Đang thực hiện
 
 - [x] Đổi detector đồng phục từ kết quả đếm tổng sang danh sách person candidate (`bbox`, confidence, yellow score, blue score), vẫn giữ adapter tương thích luồng tuyển sinh cũ.
-- [ ] Thêm tracker độc lập theo từng camera, giữ `track_id` qua che khuất ngắn.
+- [x] Thêm tracker độc lập theo từng camera, giữ `track_id` qua che khuất ngắn.
 - [ ] Bổ sung state machine ra/vào cửa: chỉ chuyển `OUTSIDE` khi có chuỗi bằng chứng qua vùng cửa; mất track giữa phòng chỉ ghi `uncertain_lost_track`.
 - [ ] Thêm service/endpoint pilot nhận frame, trả JSON contract của rule engine và health/config version.
 
@@ -25,7 +25,7 @@
 - [ ] Tích hợp Live: gửi frame 1–2 FPS kèm `camera_id`, `channel`, `captured_at`; giữ `/analyze` cũ không đổi cho profile hiện có.
 - [ ] Nối event xác minh với log/replay hiện có; UI chỉ hiển thị event đã xác thực.
 - [ ] Chỉ gọi Cosmos khi alert hoặc trạng thái vận hành thay đổi; không gọi trên mọi frame.
-- [ ] Chạy offline trên video pilot và xuất overlay track ID/zone để hiệu chỉnh.
+- [x] Chạy offline trên video pilot và xuất overlay track ID/zone để hiệu chỉnh.
 - [ ] Thêm test đầy đủ cho camera profile, crowding, ra/vào, mất track, quay lại và cảnh báo lặp.
 - [ ] Đo hiệu năng GPU/tracker, sau đó mới pin phiên bản runtime phù hợp trong requirements.
 - [ ] Đánh giá log so với video thật, chỉnh ngưỡng trước khi cân nhắc fine-tune detector.
