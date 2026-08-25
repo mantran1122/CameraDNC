@@ -14,6 +14,7 @@ import json
 import logging
 import os
 import signal
+import tempfile
 import threading
 import time
 from contextlib import asynccontextmanager
@@ -41,9 +42,11 @@ _model = None
 _processor = None
 _sampling_params = None
 _staff_uniform_detector = None
+_audio_transcriber = None
 
 # Đảm bảo không có 2 inference chạy cùng lúc
 _inference_lock = threading.Lock()
+_audio_inference_lock = threading.Lock()
 
 # Last delivered analysis per camera. Consecutive identical results are
 # suppressed so one unchanged scene does not create alert spam.
@@ -285,6 +288,37 @@ def _get_staff_uniform_detector():
     return _staff_uniform_detector
 
 
+def _get_audio_transcriber():
+    """Load Whisper lazily so image-only live monitoring keeps its startup cost."""
+    global _audio_transcriber
+    if _audio_transcriber is None:
+        import torch
+        from transformers import AutoModelForSpeechSeq2Seq, AutoProcessor, pipeline
+
+        model_id = os.getenv("COSMOS_AUDIO_MODEL", "openai/whisper-base").strip()
+        use_cuda = torch.cuda.is_available()
+        dtype = torch.float16 if use_cuda else torch.float32
+        model = AutoModelForSpeechSeq2Seq.from_pretrained(
+            model_id,
+            torch_dtype=dtype,
+            low_cpu_mem_usage=True,
+            use_safetensors=True,
+        )
+        if use_cuda:
+            model.to("cuda")
+        processor = AutoProcessor.from_pretrained(model_id)
+        _audio_transcriber = pipeline(
+            "automatic-speech-recognition",
+            model=model,
+            tokenizer=processor.tokenizer,
+            feature_extractor=processor.feature_extractor,
+            torch_dtype=dtype,
+            device=0 if use_cuda else -1,
+            max_new_tokens=128,
+        )
+    return _audio_transcriber
+
+
 def _vietnamese_detector_summary(staff_count: int, risk_level: str) -> str:
     """Describe uniform detection qualitatively, never as an exact headcount."""
     quantity = "nhiều" if staff_count > 1 else "một số"
@@ -516,6 +550,60 @@ def analyze(
 
     finally:
         _inference_lock.release()
+
+
+@app.post("/transcribe")
+def transcribe(
+    body: bytes = Body(..., media_type="application/octet-stream"),
+    x_cosmos_device_id: str | None = Header(default=None),
+    x_cosmos_channel: str | None = Header(default=None),
+    x_cosmos_captured_at: str | None = Header(default=None),
+):
+    """Transcribe one short WAV segment captured from an opted-in camera audio stream."""
+    status, detail = _get_status()
+    if status != "ready":
+        return JSONResponse(
+            {"status": "error", "detail": f"service not ready: {status}"},
+            status_code=503,
+        )
+    if not body:
+        return JSONResponse({"status": "error", "detail": "empty audio"}, status_code=400)
+    if len(body) > 20 * 1024 * 1024:
+        return JSONResponse({"status": "error", "detail": "audio exceeds 20 MB"}, status_code=413)
+    if not _audio_inference_lock.acquire(blocking=False):
+        return JSONResponse({"status": "error", "detail": "audio busy"}, status_code=429)
+
+    wav_path = None
+    try:
+        with tempfile.NamedTemporaryFile(prefix="cosmos_audio_", suffix=".wav", delete=False) as output:
+            output.write(body)
+            wav_path = output.name
+        t0 = time.perf_counter()
+        language = os.getenv("COSMOS_AUDIO_LANGUAGE", "vi").strip() or None
+        generate_kwargs = {"task": "transcribe"}
+        if language:
+            generate_kwargs["language"] = language
+        result = _get_audio_transcriber()(wav_path, generate_kwargs=generate_kwargs)
+        text = " ".join(str(result.get("text", "")).split())
+        return {
+            "status": "ok",
+            "timestamp": datetime.now().astimezone().isoformat(timespec="seconds"),
+            "device_id": x_cosmos_device_id or "unknown",
+            "channel": x_cosmos_channel,
+            "captured_at": _parse_capture_time(x_cosmos_captured_at).isoformat(timespec="seconds"),
+            "transcription_ms": int((time.perf_counter() - t0) * 1000),
+            "text": text,
+        }
+    except Exception as exc:
+        logger.exception("Audio transcription failed")
+        return JSONResponse({"status": "error", "detail": str(exc)}, status_code=500)
+    finally:
+        if wav_path:
+            try:
+                Path(wav_path).unlink(missing_ok=True)
+            except OSError:
+                pass
+        _audio_inference_lock.release()
 
 
 # ── Entry point ────────────────────────────────────────────────────────────────

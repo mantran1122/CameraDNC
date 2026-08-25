@@ -3,10 +3,12 @@
 import os
 import sys
 import json
+import subprocess
 import threading
 from datetime import datetime
 from urllib import request as urlrequest
 from urllib.error import URLError, HTTPError
+from urllib.parse import quote
 from ctypes import POINTER, c_ubyte, cast, sizeof
 
 from PyQt5.QtCore import Qt, QSettings, QTimer, pyqtSignal
@@ -39,6 +41,8 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
     connection_changed = pyqtSignal(bool)
     cosmos_result = pyqtSignal(dict)
     cosmos_status = pyqtSignal(str)
+    audio_result = pyqtSignal(dict)
+    audio_status = pyqtSignal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -56,9 +60,13 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
         self.connection_changed.connect(self._set_connection_state)
         self.cosmos_result.connect(self._show_cosmos_result)
         self.cosmos_status.connect(self._show_cosmos_status)
+        self.audio_result.connect(self._show_audio_result)
+        self.audio_status.connect(self._show_audio_status)
         self._snapshot_pending = False
         self._inference_inflight = False
         self._ai_enabled = False
+        self._audio_enabled = False
+        self._audio_inflight = False
         self._snap_serial = 0
         self._capture_times = {}
         self._last_replay = None
@@ -66,6 +74,8 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
         self._replay_windows = []
         self.cosmos_url = os.getenv('COSMOS_LIVE_URL', 'http://127.0.0.1:8765/analyze')
         self.cosmos_interval_seconds = _positive_float_from_env('COSMOS_SAMPLE_INTERVAL_SECONDS', 10)
+        self.audio_interval_seconds = _positive_float_from_env('COSMOS_AUDIO_INTERVAL_SECONDS', 15)
+        self.audio_chunk_seconds = _positive_float_from_env('COSMOS_AUDIO_CHUNK_SECONDS', 10)
         self.cosmos_stop_on_exit = os.getenv('COSMOS_STOP_ON_LIVE_CLOSE', '').strip().lower() in {'1', 'true', 'yes'}
         self._init_ui()
 
@@ -88,6 +98,9 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
         self.ai_check = QCheckBox('Phân tích Cosmos (mỗi {} giây)'.format(int(self.cosmos_interval_seconds)), self.centralwidget)
         self.ai_check.setEnabled(False)
         self.ai_check.toggled.connect(self._on_ai_toggled)
+        self.audio_check = QCheckBox('Chuyển tiếng nói thành văn bản (mỗi {} giây)'.format(int(self.audio_interval_seconds)), self.centralwidget)
+        self.audio_check.setEnabled(False)
+        self.audio_check.toggled.connect(self._on_audio_toggled)
         self.replay_event_combo = QComboBox(self.centralwidget)
         self.replay_event_combo.setEnabled(False)
         self.replay_event_combo.setToolTip('Chọn một cảnh báo AI để xem lại đoạn ghi trên đầu ghi.')
@@ -100,6 +113,12 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
         self.cosmos_log.setReadOnly(True)
         self.cosmos_log.setMaximumBlockCount(80)
         self.cosmos_log.setLineWrapMode(QPlainTextEdit.WidgetWidth)
+        self.audio_label = QLabel('Tiếng nói: đã tắt', self.centralwidget)
+        self.audio_label.setWordWrap(True)
+        self.audio_log = QPlainTextEdit(self.centralwidget)
+        self.audio_log.setReadOnly(True)
+        self.audio_log.setMaximumBlockCount(80)
+        self.audio_log.setLineWrapMode(QPlainTextEdit.WidgetWidth)
         self._build_responsive_layout()
         self.statusbar.showMessage('Chưa kết nối đầu ghi')
         self.setWindowFlag(Qt.WindowMinimizeButtonHint)
@@ -109,6 +128,9 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
         self.sample_timer = QTimer(self)
         self.sample_timer.setInterval(int(self.cosmos_interval_seconds * 1000))
         self.sample_timer.timeout.connect(self._request_snapshot)
+        self.audio_timer = QTimer(self)
+        self.audio_timer.setInterval(int(self.audio_interval_seconds * 1000))
+        self.audio_timer.timeout.connect(self._request_audio)
 
     def _build_responsive_layout(self):
         """Build an operations-first camera workspace without absolute positioning."""
@@ -179,10 +201,29 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
         ai_title.setStyleSheet('font-weight: 700;')
         ai_layout.addWidget(ai_title)
         ai_layout.addWidget(self.ai_check)
-        ai_layout.addWidget(self.cosmos_label)
+        ai_layout.addWidget(self.audio_check)
         ai_layout.addWidget(self.replay_event_combo)
         ai_layout.addWidget(self.replay_btn)
-        ai_layout.addWidget(self.cosmos_log)
+        event_columns = QSplitter(Qt.Horizontal, self.ai_panel)
+        event_columns.setChildrenCollapsible(False)
+        image_events = QFrame(event_columns)
+        image_layout = QVBoxLayout(image_events)
+        image_layout.setContentsMargins(0, 0, 0, 0)
+        image_layout.setSpacing(5)
+        image_layout.addWidget(QLabel('HÌNH ẢNH', image_events))
+        image_layout.addWidget(self.cosmos_label)
+        image_layout.addWidget(self.cosmos_log, 1)
+        audio_events = QFrame(event_columns)
+        audio_layout = QVBoxLayout(audio_events)
+        audio_layout.setContentsMargins(0, 0, 0, 0)
+        audio_layout.setSpacing(5)
+        audio_layout.addWidget(QLabel('TIẾNG NÓI', audio_events))
+        audio_layout.addWidget(self.audio_label)
+        audio_layout.addWidget(self.audio_log, 1)
+        event_columns.setStretchFactor(0, 1)
+        event_columns.setStretchFactor(1, 1)
+        event_columns.setSizes([135, 135])
+        ai_layout.addWidget(event_columns, 1)
         workspace.addWidget(self.connection_panel)
         workspace.addWidget(self.video_panel)
         workspace.addWidget(self.ai_panel)
@@ -258,6 +299,76 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
             self._ai_enabled = False
             self.sample_timer.stop()
             self.cosmos_label.setText('Cosmos: đã tắt')
+
+    def _on_audio_toggled(self, enabled):
+        if enabled and not self._is_playing():
+            self.audio_check.setChecked(False)
+            return
+        self._audio_enabled = enabled
+        if enabled:
+            self.audio_label.setText('Tiếng nói: đang chờ đoạn âm thanh...')
+            self.audio_timer.start()
+            self._request_audio()
+        else:
+            self.audio_timer.stop()
+            self.audio_label.setText('Tiếng nói: đã tắt')
+
+    def _audio_rtsp_url(self):
+        """Use an explicit URL when the recorder has a non-standard RTSP layout."""
+        template = os.getenv('COSMOS_AUDIO_RTSP_URL', '').strip()
+        channel = self.Channel_comboBox.currentData()
+        values = {
+            'host': self.IP_lineEdit.text().strip(),
+            'username': quote(self.Name_lineEdit.text().strip(), safe=''),
+            'password': quote(self.Pwd_lineEdit.text(), safe=''),
+            'channel': int(channel or 0) + 1,
+            'subtype': self.StreamTyp_comboBox.currentIndex(),
+        }
+        if template:
+            return template.format(**values)
+        return ('rtsp://{username}:{password}@{host}:554/'
+                'cam/realmonitor?channel={channel}&subtype={subtype}').format(**values)
+
+    def _request_audio(self):
+        if not self._audio_enabled or not self._is_playing() or self._audio_inflight:
+            return
+        self._audio_inflight = True
+        captured_at = datetime.now().astimezone().isoformat(timespec='seconds')
+        threading.Thread(target=self._capture_and_transcribe_audio, args=(captured_at,), daemon=True).start()
+
+    def _capture_and_transcribe_audio(self, captured_at):
+        try:
+            ffmpeg = os.getenv('COSMOS_AUDIO_FFMPEG', 'ffmpeg')
+            timeout = self.audio_chunk_seconds + 25
+            command = [
+                ffmpeg, '-hide_banner', '-loglevel', 'error', '-rtsp_transport', 'tcp',
+                '-i', self._audio_rtsp_url(), '-t', str(self.audio_chunk_seconds),
+                '-vn', '-ac', '1', '-ar', '16000', '-f', 'wav', 'pipe:1',
+            ]
+            completed = subprocess.run(command, capture_output=True, timeout=timeout, check=False)
+            if completed.returncode != 0:
+                detail = completed.stderr.decode('utf-8', 'replace').strip().splitlines()[-1:]
+                raise RuntimeError(detail[0] if detail else 'FFmpeg không lấy được audio từ RTSP')
+            if len(completed.stdout) < 1024:
+                raise RuntimeError('Không nhận được âm thanh từ camera')
+            channel = self.Channel_comboBox.currentData()
+            endpoint = self.cosmos_url.rsplit('/', 1)[0] + '/transcribe'
+            req = urlrequest.Request(endpoint, data=completed.stdout, headers={
+                'Content-Type': 'application/octet-stream',
+                'X-Cosmos-Device-Id': os.getenv('COSMOS_DEVICE_ID', self.IP_lineEdit.text().strip()),
+                'X-Cosmos-Channel': str(channel if channel is not None else ''),
+                'X-Cosmos-Captured-At': captured_at,
+            }, method='POST')
+            with urlrequest.urlopen(req, timeout=float(os.getenv('COSMOS_AUDIO_TIMEOUT_SECONDS', '120'))) as response:
+                self.audio_result.emit(json.loads(response.read().decode('utf-8')))
+        except HTTPError as exc:
+            self.audio_status.emit('Tiếng nói: {} {}'.format(exc.code, exc.read().decode('utf-8', 'replace')[:100]))
+        except (URLError, TimeoutError, subprocess.TimeoutExpired) as exc:
+            self.audio_status.emit('Tiếng nói: không kết nối được ({})'.format(exc))
+        except Exception as exc:
+            self.audio_status.emit('Tiếng nói: lỗi ({})'.format(exc))
+        finally:
+            self._audio_inflight = False
 
     def _request_snapshot(self):
         if (not self.ai_check.isChecked() or not self._is_playing() or
@@ -378,6 +489,17 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
         self.cosmos_label.setText(text)
         self.cosmos_log.appendPlainText(text)
 
+    def _show_audio_result(self, payload):
+        text = str(payload.get('text', '')).strip() or '[Không nhận diện được lời nói rõ ràng]'
+        self.audio_label.setText('Tiếng nói: đã nhận văn bản')
+        self.audio_log.appendPlainText('{} | {} ms\n{}'.format(
+            payload.get('captured_at', ''), payload.get('transcription_ms', '?'), text
+        ))
+
+    def _show_audio_status(self, text):
+        self.audio_label.setText(text)
+        self.audio_log.appendPlainText(text)
+
     def _shutdown_cosmos_if_enabled(self):
         if not self.cosmos_stop_on_exit:
             return
@@ -481,6 +603,7 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
         self.StreamTyp_comboBox.setEnabled(False)
         self.Channel_comboBox.setEnabled(False)
         self.ai_check.setEnabled(True)
+        self.audio_check.setEnabled(True)
         self.statusbar.showMessage('Đang xem Kênh {} ({})'.format(channel + 1, self.StreamTyp_comboBox.currentText()))
 
     def _stop_preview(self):
@@ -488,6 +611,8 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
             return
         self.ai_check.setChecked(False)
         self.ai_check.setEnabled(False)
+        self.audio_check.setChecked(False)
+        self.audio_check.setEnabled(False)
         if self.sdk.StopRealPlayEx(self.playID):
             self.playID = C_LLONG()
             self.play_btn.setText('Bắt đầu xem')
