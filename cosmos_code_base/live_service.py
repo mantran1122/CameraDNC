@@ -18,6 +18,7 @@ import signal
 import tempfile
 import threading
 import time
+import unicodedata
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -52,6 +53,7 @@ _audio_inference_lock = threading.Lock()
 # Last delivered analysis per camera. Consecutive identical results are
 # suppressed so one unchanged scene does not create alert spam.
 _last_live_result_fingerprints: dict[tuple[str, int | None], str] = {}
+_last_audio_transcriptions: dict[tuple[str, str | None], tuple[str, float]] = {}
 
 
 def _event_log_path(captured_at: datetime) -> Path:
@@ -320,21 +322,47 @@ def _get_audio_transcriber():
     return _audio_transcriber
 
 
-def _pcm16_wav_rms(body: bytes) -> float:
-    """Estimate normalized RMS from the PCM16 WAV emitted by the camera client."""
+def _pcm16_wav_samples(body: bytes):
+    """Read normalized PCM16 samples from the WAV emitted by the camera client."""
     import numpy as np
 
     marker = body.find(b"data")
     offset = marker + 8 if marker >= 0 else 44
     pcm = body[offset:]
     if len(pcm) < 2:
-        return 0.0
+        return np.empty(0, dtype=np.float32)
     if len(pcm) % 2:
         pcm = pcm[:-1]
     samples = np.frombuffer(pcm, dtype="<i2").astype(np.float32)
-    if samples.size == 0:
-        return 0.0
-    return float(np.sqrt(np.mean(np.square(samples / 32768.0))))
+    return samples / 32768.0
+
+
+def _pcm16_wav_rms(body: bytes) -> float:
+    """Estimate normalized RMS from the PCM16 WAV emitted by the camera client."""
+    import numpy as np
+
+    samples = _pcm16_wav_samples(body)
+    return float(np.sqrt(np.mean(np.square(samples)))) if samples.size else 0.0
+
+
+def _has_speech_activity(body: bytes, min_rms: float) -> tuple[bool, float, float]:
+    """Conservative energy VAD: speech must rise above the chunk's stationary noise floor."""
+    import numpy as np
+
+    samples = _pcm16_wav_samples(body)
+    rms = float(np.sqrt(np.mean(np.square(samples)))) if samples.size else 0.0
+    frame_size = 480  # 30 ms at the fixed 16 kHz client sample rate.
+    frame_count = samples.size // frame_size
+    if rms < min_rms or frame_count < 4:
+        return False, rms, 0.0
+    frames = samples[:frame_count * frame_size].reshape(frame_count, frame_size)
+    frame_rms = np.sqrt(np.mean(np.square(frames), axis=1))
+    noise_floor = max(float(np.percentile(frame_rms, 20)), 1e-6)
+    active_threshold = max(min_rms, noise_floor * 1.8)
+    active_seconds = float(np.count_nonzero(frame_rms >= active_threshold) * 0.03)
+    dynamic_ratio = float(np.percentile(frame_rms, 90) / noise_floor)
+    detected = active_seconds >= 0.24 and dynamic_ratio >= 1.35
+    return detected, rms, active_seconds
 
 
 def _is_repetitive_transcript(text: str) -> bool:
@@ -349,6 +377,34 @@ def _is_repetitive_transcript(text: str) -> bool:
         if matches / (len(tokens) - period) >= 0.72:
             return True
     return False
+
+
+def _fold_text(text: str) -> str:
+    value = unicodedata.normalize("NFD", text.casefold())
+    value = "".join(char for char in value if unicodedata.category(char) != "Mn")
+    return " ".join(re.findall(r"\w+", value, flags=re.UNICODE))
+
+
+def _is_known_audio_hallucination(text: str) -> bool:
+    defaults = (
+        "hay subscribe|subscribe cho kenh|dang ky kenh|khong bo lo nhung video|"
+        "cam on cac ban da xem|hen gap lai cac ban trong nhung video tiep theo|"
+        "lalaschool|thanks for watching"
+    )
+    configured = os.getenv("COSMOS_AUDIO_HALLUCINATION_PHRASES", defaults)
+    folded = _fold_text(text)
+    return any(_fold_text(phrase) in folded for phrase in configured.split("|") if phrase.strip())
+
+
+def _is_duplicate_audio_transcript(text: str, device_id: str, channel: str | None, now: float | None = None) -> bool:
+    normalized = _fold_text(text)
+    if not normalized:
+        return False
+    current_time = time.monotonic() if now is None else now
+    key = (device_id or "unknown", channel)
+    previous = _last_audio_transcriptions.get(key)
+    _last_audio_transcriptions[key] = (normalized, current_time)
+    return bool(previous and previous[0] == normalized and current_time - previous[1] <= 120)
 
 
 def _vietnamese_detector_summary(staff_count: int, risk_level: str) -> str:
@@ -615,8 +671,8 @@ def transcribe(
             min_rms = max(0.0, float(os.getenv("COSMOS_AUDIO_MIN_RMS", "0.003")))
         except ValueError:
             min_rms = 0.003
-        rms = _pcm16_wav_rms(body)
-        if rms < min_rms:
+        speech_activity, rms, active_seconds = _has_speech_activity(body, min_rms)
+        if not speech_activity:
             return {
                 "status": "ok",
                 "timestamp": datetime.now().astimezone().isoformat(timespec="seconds"),
@@ -624,8 +680,9 @@ def transcribe(
                 "transcription_ms": 0,
                 "text": "",
                 "speech_detected": False,
-                "ignored_reason": "low_audio_energy",
+                "ignored_reason": "no_speech_activity",
                 "audio_rms": round(rms, 6),
+                "active_speech_seconds": round(active_seconds, 3),
             }
         language = os.getenv("COSMOS_AUDIO_LANGUAGE", "vi").strip() or None
         generate_kwargs = {
@@ -634,14 +691,30 @@ def transcribe(
             "num_beams": 1,
             "repetition_penalty": 1.15,
             "no_repeat_ngram_size": 3,
+            "condition_on_prev_tokens": False,
+            "compression_ratio_threshold": 1.35,
+            "logprob_threshold": -0.8,
+            "no_speech_threshold": 0.55,
         }
         if language:
             generate_kwargs["language"] = language
-        result = _get_audio_transcriber()(wav_path, generate_kwargs=generate_kwargs)
+        result = _get_audio_transcriber()(wav_path, return_timestamps=True, generate_kwargs=generate_kwargs)
         text = " ".join(str(result.get("text", "")).split())
         repetitive = _is_repetitive_transcript(text)
+        hallucination = _is_known_audio_hallucination(text)
+        duplicate = _is_duplicate_audio_transcript(text, x_cosmos_device_id or "unknown", x_cosmos_channel)
+        ignored_reason = None
         if repetitive:
-            logger.info("Suppressed repetitive audio transcription for device=%s channel=%s", x_cosmos_device_id, x_cosmos_channel)
+            ignored_reason = "repetitive_transcript"
+        elif hallucination:
+            ignored_reason = "known_hallucination"
+        elif duplicate:
+            ignored_reason = "duplicate_transcript"
+        if ignored_reason:
+            logger.info(
+                "Suppressed audio transcription reason=%s device=%s channel=%s",
+                ignored_reason, x_cosmos_device_id, x_cosmos_channel,
+            )
             text = ""
         return {
             "status": "ok",
@@ -652,8 +725,9 @@ def transcribe(
             "transcription_ms": int((time.perf_counter() - t0) * 1000),
             "text": text,
             "speech_detected": bool(text),
-            "ignored_reason": "repetitive_transcript" if repetitive else None,
+            "ignored_reason": ignored_reason,
             "audio_rms": round(rms, 6),
+            "active_speech_seconds": round(active_seconds, 3),
         }
     except Exception as exc:
         logger.exception("Audio transcription failed")

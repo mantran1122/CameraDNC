@@ -38,10 +38,10 @@ Trong **Xem camera trực tiếp**, bật cả hai ô: **Phân tích Cosmos** v�
 Nút biểu tượng loa dưới khung video bật/tắt âm thanh nghe trực tiếp qua NetSDK.
 Nút này độc lập với ô chuyển lời nói thành văn bản.
 
-Service bỏ qua đoạn gần im lặng và transcript bị lặp bất thường để tránh Whisper
-tạo các câu giả như "Cảm ơn các bạn" lặp nhiều lần. Có thể tăng
-`COSMOS_AUDIO_MIN_RMS` nếu camera có nhiễu nền liên tục, hoặc giảm nhẹ nếu giọng
-nói ở xa bị bỏ qua.
+Service dùng VAD theo từng frame để bỏ qua im lặng/nhiễu đều, áp ngưỡng no-speech
+của Whisper, chặn transcript lặp giữa các chunk và các mẫu hallucination phổ biến
+như lời mời đăng ký kênh. Có thể tăng `COSMOS_AUDIO_MIN_RMS` nếu camera có nhiễu
+nền liên tục, hoặc giảm nhẹ nếu giọng nói ở xa bị bỏ qua.
 
 Mặc định app ghi một đoạn ngắn trực tiếp từ `playID` NetSDK đang mở. Vì vậy
 không cần public/NAT cổng RTSP 554. Đoạn DAV tạm được xóa ngay sau khi FFmpeg
