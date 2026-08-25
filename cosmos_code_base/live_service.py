@@ -9,6 +9,7 @@ GET /health trả {"status": "loading"} ngay khi server còn đang load model.
 """
 
 import argparse
+import hashlib
 import io
 import json
 import logging
@@ -388,7 +389,7 @@ def _fold_text(text: str) -> str:
 def _is_known_audio_hallucination(text: str) -> bool:
     defaults = (
         "hay subscribe|subscribe cho kenh|dang ky kenh|khong bo lo nhung video|"
-        "cam on cac ban da xem|hen gap lai cac ban trong nhung video tiep theo|"
+        "cam on cac ban da xem|cam on cac ban da don xem|hen gap lai cac ban trong nhung video tiep theo|"
         "lalaschool|thanks for watching"
     )
     configured = os.getenv("COSMOS_AUDIO_HALLUCINATION_PHRASES", defaults)
@@ -646,6 +647,8 @@ def transcribe(
     x_cosmos_device_id: str | None = Header(default=None),
     x_cosmos_channel: str | None = Header(default=None),
     x_cosmos_captured_at: str | None = Header(default=None),
+    x_cosmos_audio_source: str | None = Header(default=None),
+    x_cosmos_audio_sha256: str | None = Header(default=None),
 ):
     """Transcribe one short WAV segment captured from an opted-in camera audio stream."""
     status, detail = _get_status()
@@ -658,6 +661,9 @@ def transcribe(
         return JSONResponse({"status": "error", "detail": "empty audio"}, status_code=400)
     if len(body) > 20 * 1024 * 1024:
         return JSONResponse({"status": "error", "detail": "audio exceeds 20 MB"}, status_code=413)
+    audio_sha256 = hashlib.sha256(body).hexdigest()
+    if x_cosmos_audio_sha256 and x_cosmos_audio_sha256.casefold() != audio_sha256:
+        return JSONResponse({"status": "error", "detail": "audio sha256 mismatch"}, status_code=400)
     if not _audio_inference_lock.acquire(blocking=False):
         return JSONResponse({"status": "error", "detail": "audio busy"}, status_code=429)
 
@@ -676,6 +682,8 @@ def transcribe(
             return {
                 "status": "ok",
                 "timestamp": datetime.now().astimezone().isoformat(timespec="seconds"),
+                "device_id": x_cosmos_device_id or "unknown",
+                "channel": x_cosmos_channel,
                 "captured_at": _parse_capture_time(x_cosmos_captured_at).isoformat(timespec="seconds"),
                 "transcription_ms": 0,
                 "text": "",
@@ -683,6 +691,8 @@ def transcribe(
                 "ignored_reason": "no_speech_activity",
                 "audio_rms": round(rms, 6),
                 "active_speech_seconds": round(active_seconds, 3),
+                "audio_source": x_cosmos_audio_source or "unknown",
+                "audio_sha256": audio_sha256,
             }
         language = os.getenv("COSMOS_AUDIO_LANGUAGE", "vi").strip() or None
         generate_kwargs = {
@@ -724,6 +734,8 @@ def transcribe(
             "ignored_reason": ignored_reason,
             "audio_rms": round(rms, 6),
             "active_speech_seconds": round(active_seconds, 3),
+            "audio_source": x_cosmos_audio_source or "unknown",
+            "audio_sha256": audio_sha256,
         }
     except Exception as exc:
         logger.exception("Audio transcription failed")

@@ -3,11 +3,13 @@
 import os
 import sys
 import json
+import hashlib
 import subprocess
 import tempfile
 import threading
 import time
 from datetime import datetime
+from pathlib import Path
 from urllib import request as urlrequest
 from urllib.error import URLError, HTTPError
 from urllib.parse import quote
@@ -434,6 +436,30 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
         ])
         return subprocess.run(command, capture_output=True, timeout=process_timeout, check=False)
 
+    def _save_audio_debug_sample(self, wav_bytes, captured_at, source, channel):
+        configured = os.getenv('COSMOS_AUDIO_DEBUG_DIR', '').strip()
+        digest = hashlib.sha256(wav_bytes).hexdigest()
+        if not configured:
+            return None, digest
+        debug_dir = Path(configured).expanduser().resolve()
+        debug_dir.mkdir(parents=True, exist_ok=True)
+        stamp = ''.join(char for char in captured_at if char.isdigit())[:14]
+        path = debug_dir / 'audio_ch{}_{}_{}_{}.wav'.format(
+            int(channel or 0) + 1, stamp, source, digest[:12]
+        )
+        path.write_bytes(wav_bytes)
+        try:
+            keep = max(1, int(os.getenv('COSMOS_AUDIO_DEBUG_MAX_FILES', '10')))
+        except ValueError:
+            keep = 10
+        samples = sorted(debug_dir.glob('audio_ch*_*.wav'), key=lambda item: item.stat().st_mtime, reverse=True)
+        for old_sample in samples[keep:]:
+            try:
+                old_sample.unlink()
+            except OSError:
+                pass
+        return str(path), digest
+
     def _capture_and_transcribe_audio(self, captured_at):
         try:
             source = os.getenv('COSMOS_AUDIO_SOURCE', 'sdk').strip().lower()
@@ -446,15 +472,22 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
             if len(completed.stdout) < 1024:
                 raise RuntimeError('Không nhận được âm thanh từ camera')
             channel = self.Channel_comboBox.currentData()
+            debug_path, audio_sha256 = self._save_audio_debug_sample(
+                completed.stdout, captured_at, source, channel
+            )
             endpoint = self.cosmos_url.rsplit('/', 1)[0] + '/transcribe'
             req = urlrequest.Request(endpoint, data=completed.stdout, headers={
                 'Content-Type': 'application/octet-stream',
                 'X-Cosmos-Device-Id': os.getenv('COSMOS_DEVICE_ID', self.IP_lineEdit.text().strip()),
                 'X-Cosmos-Channel': str(channel if channel is not None else ''),
                 'X-Cosmos-Captured-At': captured_at,
+                'X-Cosmos-Audio-Source': source,
+                'X-Cosmos-Audio-Sha256': audio_sha256,
             }, method='POST')
             with urlrequest.urlopen(req, timeout=float(os.getenv('COSMOS_AUDIO_TIMEOUT_SECONDS', '120'))) as response:
-                self.audio_result.emit(json.loads(response.read().decode('utf-8')))
+                payload = json.loads(response.read().decode('utf-8'))
+                payload['audio_debug_path'] = debug_path
+                self.audio_result.emit(payload)
         except HTTPError as exc:
             self.audio_status.emit('Tiếng nói: {} {}'.format(exc.code, exc.read().decode('utf-8', 'replace')[:100]))
         except subprocess.TimeoutExpired:
@@ -596,8 +629,21 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
             self.audio_label.setText('Tiếng nói: chưa có lời nói rõ ràng')
             return
         self.audio_label.setText('Tiếng nói: đã nhận văn bản')
-        self.audio_log.appendPlainText('{} | {} ms\n{}'.format(
-            payload.get('captured_at', ''), payload.get('transcription_ms', '?'), text
+        channel = payload.get('channel')
+        try:
+            channel_label = 'Kênh {}'.format(int(channel) + 1)
+        except (TypeError, ValueError):
+            channel_label = 'Kênh ?'
+        source = str(payload.get('audio_source', 'unknown')).upper()
+        evidence = '{} {} | RMS {} | active {}s | SHA {}'.format(
+            source, channel_label, payload.get('audio_rms', '?'),
+            payload.get('active_speech_seconds', '?'), str(payload.get('audio_sha256', ''))[:12]
+        )
+        debug_path = payload.get('audio_debug_path')
+        if debug_path:
+            evidence += '\nMẫu kiểm tra: {}'.format(debug_path)
+        self.audio_log.appendPlainText('{} | {} ms | {}\n{}'.format(
+            payload.get('captured_at', ''), payload.get('transcription_ms', '?'), evidence, text
         ))
 
     def _show_audio_status(self, text):

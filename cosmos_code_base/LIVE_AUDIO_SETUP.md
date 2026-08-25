@@ -32,6 +32,23 @@ $env:COSMOS_AUDIO_CHUNK_SECONDS = "10"
 python .\launcher.py
 ```
 
+## Xác minh audio có đúng từ camera
+
+Mặc định `COSMOS_AUDIO_SOURCE=sdk`: client ghi từ chính `playID` của kênh đang
+xem, không lấy microphone máy tính. Để lưu tối đa 10 WAV gần nhất và tự nghe đối
+chiếu trước khi mở app:
+
+```powershell
+$env:COSMOS_AUDIO_SOURCE = "sdk"
+$env:COSMOS_AUDIO_DEBUG_DIR = "D:\dnc\audio_debug"
+$env:COSMOS_AUDIO_DEBUG_MAX_FILES = "10"
+```
+
+Mỗi transcript hợp lệ hiển thị nguồn, kênh, RMS, thời lượng có giọng và 12 ký tự
+đầu của SHA-256. Tên WAV kiểm tra chứa cùng SHA, chứng minh file nghe thủ công là
+đúng bytes đã gửi cho `/transcribe`. Debug WAV chứa âm thanh nhạy cảm; tắt bằng
+`Remove-Item Env:COSMOS_AUDIO_DEBUG_DIR` sau khi kiểm tra xong.
+
 Trong **Xem camera trực tiếp**, bật cả hai ô: **Phân tích Cosmos** và
 **Chuyển tiếng nói thành văn bản**.
 
