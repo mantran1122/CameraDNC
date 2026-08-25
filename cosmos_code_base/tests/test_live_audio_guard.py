@@ -1,10 +1,13 @@
 import struct
 import unittest
+from unittest.mock import patch
 
 import numpy as np
 
 from live_service import (
     _has_speech_activity,
+    _active_audio_model_id,
+    _audio_beam_size,
     _is_duplicate_audio_transcript,
     _is_known_audio_hallucination,
     _is_repetitive_transcript,
@@ -55,6 +58,15 @@ class LiveAudioGuardTests(unittest.TestCase):
         text = "Mời sinh viên đến bàn số hai nhận hồ sơ."
         self.assertFalse(_is_duplicate_audio_transcript(text, "camera-1", "10", now=10))
         self.assertTrue(_is_duplicate_audio_transcript(text, "camera-1", "10", now=20))
+
+    def test_vietnamese_model_and_beam_search_are_defaults(self):
+        with patch.dict("os.environ", {}, clear=True):
+            self.assertEqual(_active_audio_model_id(), "vinai/PhoWhisper-small")
+            self.assertEqual(_audio_beam_size(), 5)
+
+    def test_audio_beam_size_is_bounded(self):
+        with patch.dict("os.environ", {"COSMOS_AUDIO_BEAM_SIZE": "99"}):
+            self.assertEqual(_audio_beam_size(), 10)
 
 
 if __name__ == "__main__":

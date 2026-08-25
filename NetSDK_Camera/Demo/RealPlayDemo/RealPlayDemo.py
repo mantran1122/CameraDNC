@@ -639,6 +639,9 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
             source, channel_label, payload.get('audio_rms', '?'),
             payload.get('active_speech_seconds', '?'), str(payload.get('audio_sha256', ''))[:12]
         )
+        audio_model = payload.get('audio_model')
+        if audio_model:
+            evidence += ' | ASR {}'.format(audio_model)
         debug_path = payload.get('audio_debug_path')
         if debug_path:
             evidence += '\nMẫu kiểm tra: {}'.format(debug_path)

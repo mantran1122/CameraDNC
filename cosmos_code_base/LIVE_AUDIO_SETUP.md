@@ -3,7 +3,7 @@
 Luồng này chạy song song với Cosmos hình ảnh:
 
 ```text
-NetSDK live stream -> đoạn DAV tạm -> FFmpeg (WAV 16 kHz) -> POST /transcribe -> Whisper -> cột TIẾNG NÓI
+NetSDK live stream -> đoạn DAV tạm -> FFmpeg (WAV 16 kHz) -> POST /transcribe -> PhoWhisper -> cột TIẾNG NÓI
 ```
 
 ## Điều kiện
@@ -11,7 +11,7 @@ NetSDK live stream -> đoạn DAV tạm -> FFmpeg (WAV 16 kHz) -> POST /transcri
 - Camera/đầu ghi phải bật audio cho kênh đang xem và phía vận hành phải cho phép xử lý audio.
 - Máy chạy `NetSDK_Camera` cần có `ffmpeg` trong `PATH`.
 - `live_service.py` cần chạy ở máy GPU, có `transformers` và quyền tải model
-  `openai/whisper-small` lần đầu.
+  tiếng Việt `vinai/PhoWhisper-small` lần đầu.
 
 ## Chạy service
 
@@ -19,13 +19,19 @@ NetSDK live stream -> đoạn DAV tạm -> FFmpeg (WAV 16 kHz) -> POST /transcri
 export COSMOS_LIVE_PROMPT_PROFILE=admissions
 export COSMOS_AUDIO_LANGUAGE=vi
 export COSMOS_AUDIO_MIN_RMS=0.003
-python live_service.py --host 0.0.0.0 --port 8766 --gpu-memory-utilization 0.55
+export COSMOS_AUDIO_MODEL=vinai/PhoWhisper-small
+export COSMOS_AUDIO_BEAM_SIZE=5
+python live_service.py --host 0.0.0.0 --port 8770 --gpu-memory-utilization 0.45
 ```
+
+PhoWhisper và beam search 5 là mặc định. Nếu bản `small` đã chạy ổn nhưng phòng quá xa/ồn
+và GPU còn đủ bộ nhớ, có thể thử chất lượng cao hơn bằng
+`export COSMOS_AUDIO_MODEL=vinai/PhoWhisper-medium`, rồi khởi động lại service.
 
 ## Chạy app camera trên Windows
 
 ```powershell
-$env:COSMOS_LIVE_URL = "http://127.0.0.1:8766/analyze"
+$env:COSMOS_LIVE_URL = "http://127.0.0.1:8770/analyze"
 $env:COSMOS_SAMPLE_INTERVAL_SECONDS = "10"
 $env:COSMOS_AUDIO_INTERVAL_SECONDS = "15"
 $env:COSMOS_AUDIO_CHUNK_SECONDS = "10"

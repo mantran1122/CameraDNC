@@ -292,14 +292,27 @@ def _get_staff_uniform_detector():
     return _staff_uniform_detector
 
 
+def _active_audio_model_id() -> str:
+    """Return the configured ASR model without forcing it to load."""
+    return os.getenv("COSMOS_AUDIO_MODEL", "vinai/PhoWhisper-small").strip() or "vinai/PhoWhisper-small"
+
+
+def _audio_beam_size() -> int:
+    """Use real beam search for speech decoding while keeping configuration bounded."""
+    try:
+        return min(10, max(1, int(os.getenv("COSMOS_AUDIO_BEAM_SIZE", "5"))))
+    except ValueError:
+        return 5
+
+
 def _get_audio_transcriber():
-    """Load Whisper lazily so image-only live monitoring keeps its startup cost."""
+    """Load Vietnamese-specialized Whisper lazily so image-only monitoring stays light."""
     global _audio_transcriber
     if _audio_transcriber is None:
         import torch
         from transformers import AutoModelForSpeechSeq2Seq, AutoProcessor, pipeline
 
-        model_id = os.getenv("COSMOS_AUDIO_MODEL", "openai/whisper-small").strip()
+        model_id = _active_audio_model_id()
         use_cuda = torch.cuda.is_available()
         dtype = torch.float16 if use_cuda else torch.float32
         model = AutoModelForSpeechSeq2Seq.from_pretrained(
@@ -501,8 +514,14 @@ async def health():
             "status": "error",
             "detail": detail,
             "live_prompt_profile": _active_live_prompt_profile(),
+            "audio_model": _active_audio_model_id(),
         })
-    return {"status": status, "live_prompt_profile": _active_live_prompt_profile()}
+    return {
+        "status": status,
+        "live_prompt_profile": _active_live_prompt_profile(),
+        "audio_model": _active_audio_model_id(),
+        "audio_beam_size": _audio_beam_size(),
+    }
 
 
 @app.post("/shutdown")
@@ -693,14 +712,13 @@ def transcribe(
                 "active_speech_seconds": round(active_seconds, 3),
                 "audio_source": x_cosmos_audio_source or "unknown",
                 "audio_sha256": audio_sha256,
+                "audio_model": _active_audio_model_id(),
             }
         language = os.getenv("COSMOS_AUDIO_LANGUAGE", "vi").strip() or None
         generate_kwargs = {
             "task": "transcribe",
             "do_sample": False,
-            "num_beams": 1,
-            "repetition_penalty": 1.15,
-            "no_repeat_ngram_size": 3,
+            "num_beams": _audio_beam_size(),
         }
         if language:
             generate_kwargs["language"] = language
@@ -736,6 +754,7 @@ def transcribe(
             "active_speech_seconds": round(active_seconds, 3),
             "audio_source": x_cosmos_audio_source or "unknown",
             "audio_sha256": audio_sha256,
+            "audio_model": _active_audio_model_id(),
         }
     except Exception as exc:
         logger.exception("Audio transcription failed")
