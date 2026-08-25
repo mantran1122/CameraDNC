@@ -38,8 +38,8 @@ Trong **Xem camera trực tiếp**, bật cả hai ô: **Phân tích Cosmos** v�
 Nút biểu tượng loa dưới khung video bật/tắt âm thanh nghe trực tiếp qua NetSDK.
 Nút này độc lập với ô chuyển lời nói thành văn bản.
 
-Service dùng VAD theo từng frame để bỏ qua im lặng/nhiễu đều, áp ngưỡng no-speech
-của Whisper, chặn transcript lặp giữa các chunk và các mẫu hallucination phổ biến
+Service dùng VAD theo từng frame để bỏ qua im lặng/nhiễu đều, chặn transcript
+lặp giữa các chunk và các mẫu hallucination phổ biến
 như lời mời đăng ký kênh. Có thể tăng `COSMOS_AUDIO_MIN_RMS` nếu camera có nhiễu
 nền liên tục, hoặc giảm nhẹ nếu giọng nói ở xa bị bỏ qua.
 

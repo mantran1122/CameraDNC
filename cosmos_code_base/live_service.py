@@ -691,14 +691,10 @@ def transcribe(
             "num_beams": 1,
             "repetition_penalty": 1.15,
             "no_repeat_ngram_size": 3,
-            "condition_on_prev_tokens": False,
-            "compression_ratio_threshold": 1.35,
-            "logprob_threshold": -0.8,
-            "no_speech_threshold": 0.55,
         }
         if language:
             generate_kwargs["language"] = language
-        result = _get_audio_transcriber()(wav_path, return_timestamps=True, generate_kwargs=generate_kwargs)
+        result = _get_audio_transcriber()(wav_path, generate_kwargs=generate_kwargs)
         text = " ".join(str(result.get("text", "")).split())
         repetitive = _is_repetitive_transcript(text)
         hallucination = _is_known_audio_hallucination(text)
