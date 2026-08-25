@@ -469,6 +469,42 @@ class NetClient(metaclass=Singleton):
         return result
 
     @classmethod
+    def OpenSound(cls, realplay_id: int) -> int:
+        """Enable decoded audio playback for one live-preview handle."""
+        realplay_id = C_LLONG(realplay_id)
+        result = cls.sdk.CLIENT_OpenSound(realplay_id)
+        if result == 0:
+            print(cls.GetLastErrorMessage())
+        return result
+
+    @classmethod
+    def CloseSound(cls, realplay_id: int) -> int:
+        """Disable decoded audio playback for one live-preview handle."""
+        realplay_id = C_LLONG(realplay_id)
+        result = cls.sdk.CLIENT_CloseSound(realplay_id)
+        if result == 0:
+            print(cls.GetLastErrorMessage())
+        return result
+
+    @classmethod
+    def SaveRealData(cls, realplay_id: int, file_path: str) -> int:
+        """Save the current private live stream, including its audio track, to a temporary DAV file."""
+        realplay_id = C_LLONG(realplay_id)
+        result = cls.sdk.CLIENT_SaveRealData(realplay_id, os.fsencode(file_path))
+        if result == 0:
+            print(cls.GetLastErrorMessage())
+        return result
+
+    @classmethod
+    def StopSaveRealData(cls, realplay_id: int) -> int:
+        """Stop a recording started by SaveRealData."""
+        realplay_id = C_LLONG(realplay_id)
+        result = cls.sdk.CLIENT_StopSaveRealData(realplay_id)
+        if result == 0:
+            print(cls.GetLastErrorMessage())
+        return result
+
+    @classmethod
     def StartSearchDevicesEx(cls, pInBuf: NET_IN_STARTSERACH_DEVICE, pOutBuf: NET_OUT_STARTSERACH_DEVICE) -> C_LLONG:
         """
         异步搜索设备;asynchronism search device

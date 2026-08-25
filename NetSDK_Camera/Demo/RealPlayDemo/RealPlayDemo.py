@@ -4,7 +4,9 @@ import os
 import sys
 import json
 import subprocess
+import tempfile
 import threading
+import time
 from datetime import datetime
 from urllib import request as urlrequest
 from urllib.error import URLError, HTTPError
@@ -16,7 +18,7 @@ from PyQt5.QtGui import QIntValidator
 from PyQt5.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QFormLayout, QFrame, QHBoxLayout, QLabel,
     QMainWindow, QMessageBox, QPlainTextEdit, QSizePolicy, QSplitter, QVBoxLayout,
-    QPushButton,
+    QPushButton, QStyle, QToolButton,
 )
 
 from Demo.RealPlayDemo.RealPlayUI import Ui_MainWindow
@@ -67,6 +69,7 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
         self._ai_enabled = False
         self._audio_enabled = False
         self._audio_inflight = False
+        self._sound_enabled = False
         self._snap_serial = 0
         self._capture_times = {}
         self._last_replay = None
@@ -76,6 +79,7 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
         self.cosmos_interval_seconds = _positive_float_from_env('COSMOS_SAMPLE_INTERVAL_SECONDS', 10)
         self.audio_interval_seconds = _positive_float_from_env('COSMOS_AUDIO_INTERVAL_SECONDS', 15)
         self.audio_chunk_seconds = _positive_float_from_env('COSMOS_AUDIO_CHUNK_SECONDS', 10)
+        self.audio_connect_timeout_seconds = _positive_float_from_env('COSMOS_AUDIO_CONNECT_TIMEOUT_SECONDS', 8)
         self.cosmos_stop_on_exit = os.getenv('COSMOS_STOP_ON_LIVE_CLOSE', '').strip().lower() in {'1', 'true', 'yes'}
         self._init_ui()
 
@@ -191,7 +195,18 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
         self.PlayWnd.setAlignment(Qt.AlignCenter)
         video_layout.addWidget(self.PlayWnd, 1)
         self.video_caption = QLabel('Luồng trực tiếp từ đầu ghi', self.video_panel)
-        video_layout.addWidget(self.video_caption)
+        self.sound_btn = QToolButton(self.video_panel)
+        self.sound_btn.setEnabled(False)
+        self.sound_btn.setAutoRaise(True)
+        self.sound_btn.setToolTip('Bật âm thanh camera')
+        self.sound_btn.setIcon(self.style().standardIcon(QStyle.SP_MediaVolumeMuted))
+        self.sound_btn.clicked.connect(self._toggle_sound)
+        caption_row = QHBoxLayout()
+        caption_row.setContentsMargins(0, 0, 0, 0)
+        caption_row.addWidget(self.video_caption)
+        caption_row.addStretch(1)
+        caption_row.addWidget(self.sound_btn)
+        video_layout.addLayout(caption_row)
 
         self.ai_panel = QFrame(workspace)
         ai_layout = QVBoxLayout(self.ai_panel)
@@ -273,6 +288,12 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
             )
         )
         self.video_panel.setStyleSheet('background: {}; border: 1px solid {}; border-radius: {}px;'.format(t.S1, t.BD, t.RADIUS_CARD))
+        self.sound_btn.setStyleSheet(
+            'QToolButton {{ background: {}; color: {}; border: 1px solid {}; border-radius: {}px; padding: 6px; }} '
+            'QToolButton:hover {{ background: {}; }} QToolButton:disabled {{ color: {}; }}'.format(
+                t.S2, t.P1, t.BD2, t.RADIUS_BTN, t.S3, t.P3
+            )
+        )
         self.header_panel.setStyleSheet('background: {}; border: none; color: {}; QLabel {{ background: transparent; border: none; }}'.format(t.TOPBAR, t.P1))
 
     def _on_remember_toggled(self, checked):
@@ -313,12 +334,37 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
             self.audio_timer.stop()
             self.audio_label.setText('Tiếng nói: đã tắt')
 
+    def _toggle_sound(self):
+        if not self._is_playing():
+            return
+        if self._sound_enabled:
+            if self.sdk.CloseSound(self.playID):
+                self._set_sound_state(False)
+            else:
+                QMessageBox.warning(self, 'Âm thanh camera', self.sdk.GetLastErrorMessage())
+        else:
+            if self.sdk.OpenSound(self.playID):
+                self._set_sound_state(True)
+            else:
+                QMessageBox.warning(self, 'Âm thanh camera', self.sdk.GetLastErrorMessage())
+
+    def _set_sound_state(self, enabled):
+        self._sound_enabled = bool(enabled)
+        icon = QStyle.SP_MediaVolume if enabled else QStyle.SP_MediaVolumeMuted
+        self.sound_btn.setIcon(self.style().standardIcon(icon))
+        self.sound_btn.setToolTip('Tắt âm thanh camera' if enabled else 'Bật âm thanh camera')
+        self.video_caption.setText(
+            'Luồng trực tiếp từ đầu ghi — âm thanh đang bật'
+            if enabled else 'Luồng trực tiếp từ đầu ghi — âm thanh đang tắt'
+        )
+
     def _audio_rtsp_url(self):
         """Use an explicit URL when the recorder has a non-standard RTSP layout."""
         template = os.getenv('COSMOS_AUDIO_RTSP_URL', '').strip()
         channel = self.Channel_comboBox.currentData()
         values = {
             'host': self.IP_lineEdit.text().strip(),
+            'port': os.getenv('COSMOS_AUDIO_RTSP_PORT', '554').strip() or '554',
             'username': quote(self.Name_lineEdit.text().strip(), safe=''),
             'password': quote(self.Pwd_lineEdit.text(), safe=''),
             'channel': int(channel or 0) + 1,
@@ -326,8 +372,18 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
         }
         if template:
             return template.format(**values)
-        return ('rtsp://{username}:{password}@{host}:554/'
+        return ('rtsp://{username}:{password}@{host}:{port}/'
                 'cam/realmonitor?channel={channel}&subtype={subtype}').format(**values)
+
+    def _safe_audio_error(self, message):
+        """Never display an RTSP credential returned by FFmpeg."""
+        safe = str(message)
+        password = self.Pwd_lineEdit.text()
+        encoded_password = quote(password, safe='')
+        for secret in (password, encoded_password, self._audio_rtsp_url()):
+            if secret:
+                safe = safe.replace(secret, '[đã ẩn]')
+        return safe[-300:]
 
     def _request_audio(self):
         if not self._audio_enabled or not self._is_playing() or self._audio_inflight:
@@ -336,19 +392,57 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
         captured_at = datetime.now().astimezone().isoformat(timespec='seconds')
         threading.Thread(target=self._capture_and_transcribe_audio, args=(captured_at,), daemon=True).start()
 
+    def _ffmpeg_audio_command(self, input_args):
+        ffmpeg = os.getenv('COSMOS_AUDIO_FFMPEG', 'ffmpeg')
+        return [
+            ffmpeg, '-nostdin', '-hide_banner', '-loglevel', 'error', *input_args,
+            '-map', '0:a:0', '-t', str(self.audio_chunk_seconds), '-vn',
+            '-acodec', 'pcm_s16le', '-ac', '1', '-ar', '16000', '-f', 'wav', 'pipe:1',
+        ]
+
+    def _capture_audio_from_sdk(self):
+        """Record the active NetSDK stream, avoiding a separately exposed RTSP port."""
+        temp_file = tempfile.NamedTemporaryFile(prefix='cosmos_live_', suffix='.dav', delete=False)
+        media_path = temp_file.name
+        temp_file.close()
+        os.unlink(media_path)
+        play_id = self.playID
+        try:
+            if not self.sdk.SaveRealData(play_id, media_path):
+                raise RuntimeError('NetSDK không bắt đầu được đoạn ghi live')
+            try:
+                time.sleep(self.audio_chunk_seconds)
+            finally:
+                self.sdk.StopSaveRealData(play_id)
+            if not os.path.exists(media_path) or os.path.getsize(media_path) < 1024:
+                raise RuntimeError('NetSDK không nhận được dữ liệu media từ camera')
+            command = self._ffmpeg_audio_command(['-i', media_path])
+            completed = subprocess.run(command, capture_output=True, timeout=self.audio_chunk_seconds + 20, check=False)
+            return completed
+        finally:
+            try:
+                os.unlink(media_path)
+            except OSError:
+                pass
+
+    def _capture_audio_from_rtsp(self):
+        io_timeout_us = str(int(self.audio_connect_timeout_seconds * 1_000_000))
+        process_timeout = self.audio_connect_timeout_seconds + self.audio_chunk_seconds + 12
+        command = self._ffmpeg_audio_command([
+            '-rtsp_transport', 'tcp', '-rw_timeout', io_timeout_us, '-timeout', io_timeout_us,
+            '-analyzeduration', '2000000', '-probesize', '1000000', '-i', self._audio_rtsp_url(),
+        ])
+        return subprocess.run(command, capture_output=True, timeout=process_timeout, check=False)
+
     def _capture_and_transcribe_audio(self, captured_at):
         try:
-            ffmpeg = os.getenv('COSMOS_AUDIO_FFMPEG', 'ffmpeg')
-            timeout = self.audio_chunk_seconds + 25
-            command = [
-                ffmpeg, '-hide_banner', '-loglevel', 'error', '-rtsp_transport', 'tcp',
-                '-i', self._audio_rtsp_url(), '-t', str(self.audio_chunk_seconds),
-                '-vn', '-ac', '1', '-ar', '16000', '-f', 'wav', 'pipe:1',
-            ]
-            completed = subprocess.run(command, capture_output=True, timeout=timeout, check=False)
+            source = os.getenv('COSMOS_AUDIO_SOURCE', 'sdk').strip().lower()
+            completed = self._capture_audio_from_rtsp() if source == 'rtsp' else self._capture_audio_from_sdk()
             if completed.returncode != 0:
                 detail = completed.stderr.decode('utf-8', 'replace').strip().splitlines()[-1:]
-                raise RuntimeError(detail[0] if detail else 'FFmpeg không lấy được audio từ RTSP')
+                raise RuntimeError(self._safe_audio_error(
+                    detail[0] if detail else 'FFmpeg không lấy được audio từ RTSP'
+                ))
             if len(completed.stdout) < 1024:
                 raise RuntimeError('Không nhận được âm thanh từ camera')
             channel = self.Channel_comboBox.currentData()
@@ -363,10 +457,17 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
                 self.audio_result.emit(json.loads(response.read().decode('utf-8')))
         except HTTPError as exc:
             self.audio_status.emit('Tiếng nói: {} {}'.format(exc.code, exc.read().decode('utf-8', 'replace')[:100]))
-        except (URLError, TimeoutError, subprocess.TimeoutExpired) as exc:
+        except subprocess.TimeoutExpired:
+            if source == 'rtsp':
+                self.audio_status.emit(
+                    'Tiếng nói: RTSP quá thời gian kết nối; kiểm tra cổng RTSP và audio của kênh camera.'
+                )
+            else:
+                self.audio_status.emit('Tiếng nói: FFmpeg xử lý đoạn media quá thời gian.')
+        except (URLError, TimeoutError) as exc:
             self.audio_status.emit('Tiếng nói: không kết nối được ({})'.format(exc))
         except Exception as exc:
-            self.audio_status.emit('Tiếng nói: lỗi ({})'.format(exc))
+            self.audio_status.emit('Tiếng nói: lỗi ({})'.format(self._safe_audio_error(exc)))
         finally:
             self._audio_inflight = False
 
@@ -604,6 +705,8 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
         self.Channel_comboBox.setEnabled(False)
         self.ai_check.setEnabled(True)
         self.audio_check.setEnabled(True)
+        self.sound_btn.setEnabled(True)
+        self._set_sound_state(False)
         self.statusbar.showMessage('Đang xem Kênh {} ({})'.format(channel + 1, self.StreamTyp_comboBox.currentText()))
 
     def _stop_preview(self):
@@ -613,6 +716,10 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
         self.ai_check.setEnabled(False)
         self.audio_check.setChecked(False)
         self.audio_check.setEnabled(False)
+        if self._sound_enabled:
+            self.sdk.CloseSound(self.playID)
+        self._set_sound_state(False)
+        self.sound_btn.setEnabled(False)
         if self.sdk.StopRealPlayEx(self.playID):
             self.playID = C_LLONG()
             self.play_btn.setText('Bắt đầu xem')

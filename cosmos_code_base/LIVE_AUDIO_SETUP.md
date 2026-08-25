@@ -3,7 +3,7 @@
 Luồng này chạy song song với Cosmos hình ảnh:
 
 ```text
-RTSP audio của đầu ghi -> FFmpeg (WAV 16 kHz) -> POST /transcribe -> Whisper -> cột TIẾNG NÓI
+NetSDK live stream -> đoạn DAV tạm -> FFmpeg (WAV 16 kHz) -> POST /transcribe -> Whisper -> cột TIẾNG NÓI
 ```
 
 ## Điều kiện
@@ -34,7 +34,14 @@ python .\launcher.py
 Trong **Xem camera trực tiếp**, bật cả hai ô: **Phân tích Cosmos** và
 **Chuyển tiếng nói thành văn bản**.
 
-Mặc định app dùng RTSP Dahua:
+Nút biểu tượng loa dưới khung video bật/tắt âm thanh nghe trực tiếp qua NetSDK.
+Nút này độc lập với ô chuyển lời nói thành văn bản.
+
+Mặc định app ghi một đoạn ngắn trực tiếp từ `playID` NetSDK đang mở. Vì vậy
+không cần public/NAT cổng RTSP 554. Đoạn DAV tạm được xóa ngay sau khi FFmpeg
+tách audio.
+
+Chỉ khi chủ động đặt `$env:COSMOS_AUDIO_SOURCE = "rtsp"`, app mới dùng RTSP Dahua:
 
 ```text
 rtsp://<user>:<password>@<host>:554/cam/realmonitor?channel=<1-based>&subtype=<0-or-1>
@@ -47,5 +54,17 @@ Nếu đầu ghi dùng RTSP URL khác, đặt template này trước khi mở ap
 $env:COSMOS_AUDIO_RTSP_URL = "rtsp://{username}:{password}@{host}:554/cam/realmonitor?channel={channel}&subtype={subtype}"
 ```
 
-Audio không được ghi vào đĩa: FFmpeg gửi WAV trong bộ nhớ; service xóa file tạm
-ngay sau khi Whisper hoàn tất.
+Nếu đầu ghi không mở RTSP ở cổng 554, đặt cổng thật trước khi mở app:
+
+```powershell
+$env:COSMOS_AUDIO_RTSP_PORT = "554"
+$env:COSMOS_AUDIO_CONNECT_TIMEOUT_SECONDS = "8"
+```
+
+Lỗi `RTSP quá thời gian kết nối` nghĩa là Windows không truy cập được cổng
+RTSP của đầu ghi, không phải lỗi Whisper. Kiểm tra nhanh bằng
+`Test-NetConnection <IP> -Port <RTSP_PORT>`.
+
+NetSDK tạo một đoạn DAV tạm trong thư mục temp của Windows để lấy cả audio từ
+kết nối SDK; client xóa đoạn này ngay sau khi FFmpeg xử lý. WAV được gửi trong
+bộ nhớ và service xóa file WAV tạm ngay sau khi Whisper hoàn tất.
