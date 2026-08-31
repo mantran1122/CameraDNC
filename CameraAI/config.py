@@ -55,6 +55,7 @@ DEMO_MODE = _current_cfg.get("demo_mode", True)
 PRE_BUFFER_SEC = _current_cfg.get("pre_buffer_sec", 5)
 POST_BUFFER_SEC = _current_cfg.get("post_buffer_sec", 5)
 CLIP_DURATION_SEC = PRE_BUFFER_SEC + POST_BUFFER_SEC
+COSMOS_AUDIO_URL = os.getenv("COSMOS_AUDIO_URL", "http://127.0.0.1:8765/transcribe")
 
 def get_ffmpeg_executable():
     import shutil
@@ -71,6 +72,12 @@ def get_ffmpeg_executable():
         return "ffmpeg"
 
 FFMPEG_PATH = get_ffmpeg_executable()
+
+def get_ffprobe_executable():
+    import shutil
+    return os.getenv("FFPROBE_PATH") or shutil.which("ffprobe") or "ffprobe"
+
+FFPROBE_PATH = get_ffprobe_executable()
 
 EVENT_CODES = [
     "All",

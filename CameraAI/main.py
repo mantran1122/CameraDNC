@@ -16,6 +16,7 @@ import config
 import database
 import summary_engine
 import video_clipper
+from audio_analysis_worker import AudioAnalysisWorker
 from dahua_client import DahuaNVRListener
 from simulator import NVRDataSimulator
 
@@ -62,6 +63,7 @@ manager = ConnectionManager()
 
 nvr_listener = None
 simulator_thread = None
+audio_analysis_worker = None
 # The FastAPI/Uvicorn event loop belongs to the server thread. Listener and
 # simulator threads use this stored reference to schedule WebSocket broadcasts.
 server_event_loop: Optional[asyncio.AbstractEventLoop] = None
@@ -78,21 +80,28 @@ def broadcast_event_sync(event_obj: dict):
         print(f"[WebSocket Broadcast Error] {e}")
 
 def restart_listener_service():
-    global nvr_listener, simulator_thread
+    global nvr_listener, simulator_thread, audio_analysis_worker
     if nvr_listener:
         nvr_listener.stop()
     if simulator_thread:
         simulator_thread.stop()
+    if audio_analysis_worker:
+        audio_analysis_worker.stop()
 
     nvr_listener = None
     simulator_thread = None
+    audio_analysis_worker = AudioAnalysisWorker(on_updated=broadcast_audio_analysis_update)
+    audio_analysis_worker.start()
 
     # Demo data must never be created while connected to a production NVR.
     if config.DEMO_MODE:
         simulator_thread = NVRDataSimulator(broadcast_callback=broadcast_event_sync)
         simulator_thread.start()
 
-    nvr_listener = DahuaNVRListener(broadcast_callback=broadcast_event_sync)
+    nvr_listener = DahuaNVRListener(
+        broadcast_callback=broadcast_event_sync,
+        audio_job_callback=audio_analysis_worker.enqueue,
+    )
     nvr_listener.start()
 
 @app.on_event("startup")
@@ -105,12 +114,21 @@ async def startup_event():
 
 @app.on_event("shutdown")
 async def shutdown_event():
-    global nvr_listener, simulator_thread, server_event_loop
+    global nvr_listener, simulator_thread, audio_analysis_worker, server_event_loop
     if nvr_listener:
         nvr_listener.stop()
     if simulator_thread:
         simulator_thread.stop()
+    if audio_analysis_worker:
+        audio_analysis_worker.stop()
     server_event_loop = None
+
+
+def broadcast_audio_analysis_update(event_id: int):
+    event = database.get_event_by_id(event_id)
+    if event:
+        event["audio_analysis"] = database.get_audio_analysis(event_id)
+        broadcast_event_sync(event)
 
 # --- ROUTES & APIS ---
 

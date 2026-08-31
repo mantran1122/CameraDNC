@@ -11,9 +11,10 @@ import database
 import video_clipper
 
 class DahuaNVRListener(threading.Thread):
-    def __init__(self, broadcast_callback=None):
+    def __init__(self, broadcast_callback=None, audio_job_callback=None):
         super().__init__(daemon=True)
         self.broadcast_callback = broadcast_callback
+        self.audio_job_callback = audio_job_callback
         self.is_running = False
         
     def stop(self):
@@ -106,7 +107,7 @@ class DahuaNVRListener(threading.Thread):
             description = f"Metadata Phương tiện: Phát hiện xe tại Cam {channel:02d}"
 
         clip_name = None
-        if event_type in ["audio_anomaly", "video_anomaly"]:
+        if event_type == "video_anomaly":
             clip_filename = f"clip_ch{channel}_{now.strftime('%Y%m%d_%H%M%S')}.mp4"
             clip_name = video_clipper.clip_event_video(
                 channel=channel,
@@ -127,6 +128,10 @@ class DahuaNVRListener(threading.Thread):
             metadata_dict=event_data,
             clip_filename=clip_name
         )
+        if event_type == "audio_anomaly":
+            database.create_audio_analysis(event_id)
+            if self.audio_job_callback:
+                self.audio_job_callback(event_id)
         
         event_obj = database.get_event_by_id(event_id)
         if event_obj and self.broadcast_callback:
