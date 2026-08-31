@@ -1,5 +1,6 @@
 import subprocess
 import os
+from urllib.parse import quote
 from datetime import datetime, timedelta
 import cv2
 import numpy as np
@@ -152,8 +153,10 @@ def clip_event_video(
     end_str = end_time.strftime("%Y_%m_%d_%H_%M_%S")
     timestamp_display = event_timestamp.strftime("%Y-%m-%d %H:%M:%S")
     
+    rtsp_user = quote(str(config.NVR_USER), safe="")
+    rtsp_password = quote(str(config.NVR_PASSWORD), safe="")
     rtsp_url = (
-        f"rtsp://{config.NVR_USER}:{config.NVR_PASSWORD}@{config.NVR_HOST}:{config.RTSP_PORT}"
+        f"rtsp://{rtsp_user}:{rtsp_password}@{config.NVR_HOST}:{config.RTSP_PORT}"
         f"/cam/playback?channel={channel}&starttime={start_str}&endtime={end_str}"
     )
     

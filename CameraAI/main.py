@@ -1,6 +1,7 @@
 import os
 import json
 import asyncio
+from urllib.parse import quote
 from typing import List, Optional
 from datetime import date
 import requests
@@ -165,7 +166,9 @@ async def get_daily_summary_api(date_str: Optional[str] = None):
     return summary
 
 def generate_frames(channel: int):
-    rtsp_url = f"rtsp://{config.NVR_USER}:{config.NVR_PASSWORD}@{config.NVR_HOST}:{config.RTSP_PORT}/cam/realmonitor?channel={channel}&subtype=1"
+    rtsp_user = quote(str(config.NVR_USER), safe="")
+    rtsp_password = quote(str(config.NVR_PASSWORD), safe="")
+    rtsp_url = f"rtsp://{rtsp_user}:{rtsp_password}@{config.NVR_HOST}:{config.RTSP_PORT}/cam/realmonitor?channel={channel}&subtype=1"
     
     if config.DEMO_MODE:
         cap = None
