@@ -3,6 +3,7 @@
 import os
 import sys
 import json
+import shutil
 import hashlib
 import subprocess
 import tempfile
@@ -12,13 +13,19 @@ from datetime import datetime
 from pathlib import Path
 from urllib import request as urlrequest
 from urllib.error import URLError, HTTPError
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 from ctypes import POINTER, c_ubyte, cast, sizeof
+
+# Preload torch on Windows before PyQt5 loads C++ runtime/DLLs to prevent WinError 1114 in c10.dll
+try:
+    import torch
+except Exception:
+    pass
 
 from PyQt5.QtCore import Qt, QSettings, QTimer, pyqtSignal
 from PyQt5.QtGui import QIntValidator
 from PyQt5.QtWidgets import (
-    QApplication, QCheckBox, QComboBox, QFormLayout, QFrame, QHBoxLayout, QLabel,
+    QApplication, QCheckBox, QComboBox, QFileDialog, QFormLayout, QFrame, QHBoxLayout, QLabel,
     QMainWindow, QMessageBox, QPlainTextEdit, QSizePolicy, QSplitter, QVBoxLayout,
     QPushButton, QStyle, QToolButton,
 )
@@ -71,16 +78,20 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
         self._ai_enabled = False
         self._audio_enabled = False
         self._audio_inflight = False
+        self._audio_cancel = None
+        self._audio_thread = None
         self._sound_enabled = False
         self._snap_serial = 0
         self._capture_times = {}
         self._last_replay = None
         self._replay_events = []
         self._replay_windows = []
+        self._local_audio_pipeline = None
+        self._live_transcripts = []
         self.cosmos_url = os.getenv('COSMOS_LIVE_URL', 'http://127.0.0.1:8765/analyze')
         self.cosmos_interval_seconds = _positive_float_from_env('COSMOS_SAMPLE_INTERVAL_SECONDS', 10)
-        self.audio_interval_seconds = _positive_float_from_env('COSMOS_AUDIO_INTERVAL_SECONDS', 15)
-        self.audio_chunk_seconds = _positive_float_from_env('COSMOS_AUDIO_CHUNK_SECONDS', 10)
+        self.audio_interval_seconds = _positive_float_from_env('COSMOS_AUDIO_INTERVAL_SECONDS', 8)
+        self.audio_chunk_seconds = _positive_float_from_env('COSMOS_AUDIO_CHUNK_SECONDS', 8)
         self.audio_connect_timeout_seconds = _positive_float_from_env('COSMOS_AUDIO_CONNECT_TIMEOUT_SECONDS', 8)
         self.cosmos_stop_on_exit = os.getenv('COSMOS_STOP_ON_LIVE_CLOSE', '').strip().lower() in {'1', 'true', 'yes'}
         self._init_ui()
@@ -125,6 +136,15 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
         self.audio_log.setReadOnly(True)
         self.audio_log.setMaximumBlockCount(80)
         self.audio_log.setLineWrapMode(QPlainTextEdit.WidgetWidth)
+        self.audio_copy_btn = QPushButton('Sao chép', self.centralwidget)
+        self.audio_copy_btn.setToolTip('Sao chép toàn bộ nhật ký tiếng nói vào Clipboard')
+        self.audio_copy_btn.clicked.connect(self._copy_audio_log)
+        self.audio_save_btn = QPushButton('Lưu .txt', self.centralwidget)
+        self.audio_save_btn.setToolTip('Lưu nhật ký phân tích tiếng nói ra file')
+        self.audio_save_btn.clicked.connect(self._save_audio_log)
+        self.audio_clear_btn = QPushButton('Xóa', self.centralwidget)
+        self.audio_clear_btn.setToolTip('Xóa nội dung nhật ký tiếng nói đang hiển thị')
+        self.audio_clear_btn.clicked.connect(self._clear_audio_log)
         self._build_responsive_layout()
         self.statusbar.showMessage('Chưa kết nối đầu ghi')
         self.setWindowFlag(Qt.WindowMinimizeButtonHint)
@@ -237,6 +257,12 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
         audio_layout.addWidget(QLabel('TIẾNG NÓI', audio_events))
         audio_layout.addWidget(self.audio_label)
         audio_layout.addWidget(self.audio_log, 1)
+        audio_btn_row = QHBoxLayout()
+        audio_btn_row.setSpacing(4)
+        audio_btn_row.addWidget(self.audio_copy_btn)
+        audio_btn_row.addWidget(self.audio_save_btn)
+        audio_btn_row.addWidget(self.audio_clear_btn)
+        audio_layout.addLayout(audio_btn_row)
         event_columns.setStretchFactor(0, 1)
         event_columns.setStretchFactor(1, 1)
         event_columns.setSizes([135, 135])
@@ -334,6 +360,7 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
             self._request_audio()
         else:
             self.audio_timer.stop()
+            self._cancel_audio_capture()
             self.audio_label.setText('Tiếng nói: đã tắt')
 
     def _toggle_sound(self):
@@ -360,29 +387,45 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
             if enabled else 'Luồng trực tiếp từ đầu ghi — âm thanh đang tắt'
         )
 
-    def _audio_rtsp_url(self):
+    def _transcribe_url(self):
+        value = self.cosmos_url.rstrip('/')
+        if value.endswith('/transcribe'):
+            return value
+        if value.endswith('/analyze'):
+            return value.rsplit('/', 1)[0] + '/transcribe'
+        return value + '/transcribe'
+
+    def _shutdown_url(self):
+        value = self.cosmos_url.rstrip('/')
+        if value.endswith('/shutdown'):
+            return value
+        if value.endswith('/analyze') or value.endswith('/transcribe'):
+            return value.rsplit('/', 1)[0] + '/shutdown'
+        return value + '/shutdown'
+
+    def _audio_rtsp_url(self, ctx):
         """Use an explicit URL when the recorder has a non-standard RTSP layout."""
         template = os.getenv('COSMOS_AUDIO_RTSP_URL', '').strip()
-        channel = self.Channel_comboBox.currentData()
+        channel = ctx['channel']
         values = {
-            'host': self.IP_lineEdit.text().strip(),
+            'host': ctx['host'],
             'port': os.getenv('COSMOS_AUDIO_RTSP_PORT', '554').strip() or '554',
-            'username': quote(self.Name_lineEdit.text().strip(), safe=''),
-            'password': quote(self.Pwd_lineEdit.text(), safe=''),
+            'username': quote(ctx['username'], safe=''),
+            'password': quote(ctx['password'], safe=''),
             'channel': int(channel or 0) + 1,
-            'subtype': self.StreamTyp_comboBox.currentIndex(),
+            'subtype': ctx['subtype'],
         }
         if template:
             return template.format(**values)
         return ('rtsp://{username}:{password}@{host}:{port}/'
                 'cam/realmonitor?channel={channel}&subtype={subtype}').format(**values)
 
-    def _safe_audio_error(self, message):
+    def _safe_audio_error(self, message, ctx):
         """Never display an RTSP credential returned by FFmpeg."""
         safe = str(message)
-        password = self.Pwd_lineEdit.text()
+        password = ctx['password']
         encoded_password = quote(password, safe='')
-        for secret in (password, encoded_password, self._audio_rtsp_url()):
+        for secret in (password, encoded_password, self._audio_rtsp_url(ctx)):
             if secret:
                 safe = safe.replace(secret, '[đã ẩn]')
         return safe[-300:]
@@ -390,51 +433,147 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
     def _request_audio(self):
         if not self._audio_enabled or not self._is_playing() or self._audio_inflight:
             return
+        ctx = {
+            'channel': self.Channel_comboBox.currentData(),
+            'host': self.IP_lineEdit.text().strip(),
+            'username': self.Name_lineEdit.text().strip(),
+            'password': self.Pwd_lineEdit.text(),
+            'subtype': self.StreamTyp_comboBox.currentIndex(),
+            'play_handle': getattr(self.playID, 'value', self.playID),
+        }
         self._audio_inflight = True
         captured_at = datetime.now().astimezone().isoformat(timespec='seconds')
-        threading.Thread(target=self._capture_and_transcribe_audio, args=(captured_at,), daemon=True).start()
+        cancel = threading.Event()
+        self._audio_cancel = cancel
+        thread = threading.Thread(target=self._capture_and_transcribe_audio, args=(captured_at, ctx, cancel), daemon=True)
+        self._audio_thread = thread
+        thread.start()
+
+    def _cancel_audio_capture(self, timeout=15.0):
+        """Stop the audio worker and wait for it while SDK handles are still valid."""
+        cancel = self._audio_cancel
+        thread = self._audio_thread
+        if cancel is not None:
+            cancel.set()
+        if thread is not None and thread.is_alive():
+            thread.join(timeout)
+        self._audio_thread = None
+
+    def _ffmpeg_path(self):
+        configured = os.getenv('COSMOS_AUDIO_FFMPEG', '').strip()
+        if configured and (os.path.isfile(configured) or shutil.which(configured)):
+            return configured
+        return shutil.which('ffmpeg') or 'ffmpeg'
 
     def _ffmpeg_audio_command(self, input_args):
-        ffmpeg = os.getenv('COSMOS_AUDIO_FFMPEG', 'ffmpeg')
+        ffmpeg = self._ffmpeg_path()
         return [
-            ffmpeg, '-nostdin', '-hide_banner', '-loglevel', 'error', *input_args,
-            '-map', '0:a:0', '-t', str(self.audio_chunk_seconds), '-vn',
+            ffmpeg, '-nostdin', '-hide_banner', '-loglevel', 'error',
+            '-threads', '2', '-probesize', '32768', '-analyzeduration', '0',
+            *input_args,
+            '-map', '0:a:0?', '-t', str(self.audio_chunk_seconds),
+            '-vn', '-sn', '-dn',
             '-acodec', 'pcm_s16le', '-ac', '1', '-ar', '16000', '-f', 'wav', 'pipe:1',
         ]
 
-    def _capture_audio_from_sdk(self):
+    def _capture_audio_from_sdk(self, ctx, cancel):
         """Record the active NetSDK stream, avoiding a separately exposed RTSP port."""
-        temp_file = tempfile.NamedTemporaryFile(prefix='cosmos_live_', suffix='.dav', delete=False)
-        media_path = temp_file.name
-        temp_file.close()
-        os.unlink(media_path)
-        play_id = self.playID
-        try:
-            if not self.sdk.SaveRealData(play_id, media_path):
-                raise RuntimeError('NetSDK không bắt đầu được đoạn ghi live')
-            try:
-                time.sleep(self.audio_chunk_seconds)
-            finally:
-                self.sdk.StopSaveRealData(play_id)
-            if not os.path.exists(media_path) or os.path.getsize(media_path) < 1024:
-                raise RuntimeError('NetSDK không nhận được dữ liệu media từ camera')
-            command = self._ffmpeg_audio_command(['-i', media_path])
-            completed = subprocess.run(command, capture_output=True, timeout=self.audio_chunk_seconds + 20, check=False)
-            return completed
-        finally:
-            try:
-                os.unlink(media_path)
-            except OSError:
-                pass
+        if cancel.is_set():
+            return None, b''
+        temp_dav = tempfile.NamedTemporaryFile(prefix='cosmos_live_', suffix='.dav', delete=False)
+        media_path = temp_dav.name
+        temp_dav.close()
 
-    def _capture_audio_from_rtsp(self):
+        temp_wav = tempfile.NamedTemporaryFile(prefix='cosmos_live_', suffix='.wav', delete=False)
+        wav_path = temp_wav.name
+        temp_wav.close()
+
+        play_handle = ctx['play_handle']
+        try:
+            os.unlink(media_path)
+        except OSError:
+            pass
+        try:
+            os.unlink(wav_path)
+        except OSError:
+            pass
+
+        try:
+            if not self.sdk.SaveRealData(play_handle, media_path):
+                raise RuntimeError('NetSDK không bắt đầu được đoạn ghi: ' + self.sdk.GetLastErrorMessage())
+            try:
+                cancel.wait(self.audio_chunk_seconds)
+            finally:
+                self.sdk.StopSaveRealData(play_handle)
+            if cancel.is_set():
+                return None, b''
+            if not os.path.exists(media_path) or os.path.getsize(media_path) < 512:
+                self.audio_status.emit('Tiếng nói: Đang đồng bộ luồng âm thanh từ camera...')
+                return None, b''
+
+            ffmpeg = self._ffmpeg_path()
+            command = [
+                ffmpeg, '-y', '-nostdin', '-hide_banner', '-loglevel', 'error',
+                '-threads', '2', '-probesize', '2000000', '-analyzeduration', '2000000',
+                '-i', media_path,
+                '-map', '0:a:0?', '-t', str(self.audio_chunk_seconds),
+                '-vn', '-sn', '-dn',
+                '-acodec', 'pcm_s16le', '-ac', '1', '-ar', '16000',
+                wav_path,
+            ]
+            completed = subprocess.run(command, capture_output=True, timeout=self.audio_chunk_seconds + 20, check=False)
+            if completed.returncode != 0 or not os.path.exists(wav_path) or os.path.getsize(wav_path) < 1024:
+                self.audio_status.emit('Tiếng nói: Đang lắng nghe luồng âm thanh trực tiếp...')
+                return None, b''
+
+            with open(wav_path, 'rb') as f:
+                wav_bytes = f.read()
+            return completed, wav_bytes
+        finally:
+            for p in (media_path, wav_path):
+                try:
+                    os.unlink(p)
+                except OSError:
+                    pass
+
+    def _capture_audio_from_rtsp(self, ctx, cancel):
+        if cancel.is_set():
+            return None, b''
+        temp_wav = tempfile.NamedTemporaryFile(prefix='cosmos_rtsp_', suffix='.wav', delete=False)
+        wav_path = temp_wav.name
+        temp_wav.close()
+        try:
+            os.unlink(wav_path)
+        except OSError:
+            pass
+
         io_timeout_us = str(int(self.audio_connect_timeout_seconds * 1_000_000))
         process_timeout = self.audio_connect_timeout_seconds + self.audio_chunk_seconds + 12
-        command = self._ffmpeg_audio_command([
+        ffmpeg = self._ffmpeg_path()
+        command = [
+            ffmpeg, '-y', '-nostdin', '-hide_banner', '-loglevel', 'error',
             '-rtsp_transport', 'tcp', '-rw_timeout', io_timeout_us, '-timeout', io_timeout_us,
-            '-analyzeduration', '2000000', '-probesize', '1000000', '-i', self._audio_rtsp_url(),
-        ])
-        return subprocess.run(command, capture_output=True, timeout=process_timeout, check=False)
+            '-analyzeduration', '2000000', '-probesize', '2000000', '-i', self._audio_rtsp_url(ctx),
+            '-map', '0:a:0?', '-t', str(self.audio_chunk_seconds),
+            '-vn', '-sn', '-dn',
+            '-acodec', 'pcm_s16le', '-ac', '1', '-ar', '16000',
+            wav_path,
+        ]
+        try:
+            completed = subprocess.run(command, capture_output=True, timeout=process_timeout, check=False)
+            if cancel.is_set():
+                return None, b''
+            if completed.returncode != 0 or not os.path.exists(wav_path) or os.path.getsize(wav_path) < 1024:
+                self.audio_status.emit('Tiếng nói: Đang lắng nghe luồng âm thanh trực tiếp...')
+                return None, b''
+            with open(wav_path, 'rb') as f:
+                wav_bytes = f.read()
+            return completed, wav_bytes
+        finally:
+            try:
+                os.unlink(wav_path)
+            except OSError:
+                pass
 
     def _save_audio_debug_sample(self, wav_bytes, captured_at, source, channel):
         configured = os.getenv('COSMOS_AUDIO_DEBUG_DIR', '').strip()
@@ -460,34 +599,279 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
                 pass
         return str(path), digest
 
-    def _capture_and_transcribe_audio(self, captured_at):
+    def _transcribe_locally(self, wav_bytes, captured_at, source, channel):
+        """Perform in-process speech-to-text with multi-stage VAD and PhoWhisper."""
+        import numpy as np
+
+        marker = wav_bytes.find(b'data')
+        offset = marker + 8 if marker >= 0 else 44
+        pcm = wav_bytes[offset:]
+        if len(pcm) % 2:
+            pcm = pcm[:-1]
+        samples = (
+            np.frombuffer(pcm, dtype='<i2').astype(np.float32) / 32768.0
+            if len(pcm) >= 2 else np.empty(0, dtype=np.float32)
+        )
+        if samples.size == 0:
+            return {
+                'status': 'ok',
+                'captured_at': captured_at,
+                'channel': channel,
+                'transcription_ms': 0,
+                'text': '',
+                'speech_detected': False,
+                'ignored_reason': 'empty_audio',
+                'audio_rms': 0.0,
+                'audio_peak': 0.0,
+                'audio_source': source + ' (local)',
+                'audio_sha256': hashlib.sha256(wav_bytes).hexdigest(),
+                'audio_model': os.getenv('COSMOS_AUDIO_MODEL', 'vinai/PhoWhisper-small'),
+            }
+
+        # Khử DC Offset
+        samples = samples - np.mean(samples)
+        rms = float(np.sqrt(np.mean(np.square(samples))))
+        peak = float(np.max(np.abs(samples)))
+
+        min_rms = float(os.getenv('COSMOS_AUDIO_MIN_RMS', '0.012'))
+        min_peak = float(os.getenv('COSMOS_AUDIO_MIN_PEAK', '0.064'))
+
+        frame_size = 480  # 30 ms tại 16kHz
+        frame_count = samples.size // frame_size
+
+        # Tầng 1: Ngưỡng sàn năng lượng tuyệt đối (đã hạ 20% để nhạy hơn với âm lượng micro thực tế)
+        if rms < min_rms or peak < min_peak or frame_count < 8:
+            return {
+                'status': 'ok',
+                'captured_at': captured_at,
+                'channel': channel,
+                'transcription_ms': 0,
+                'text': '',
+                'speech_detected': False,
+                'ignored_reason': 'below_minimum_energy',
+                'audio_rms': round(rms, 6),
+                'audio_peak': round(peak, 6),
+                'audio_source': source + ' (local)',
+                'audio_sha256': hashlib.sha256(wav_bytes).hexdigest(),
+                'audio_model': os.getenv('COSMOS_AUDIO_MODEL', 'vinai/PhoWhisper-small'),
+            }
+
+        # Tầng 2: Sàn nhiễu nền tĩnh (Stationary Noise Floor) & Tỷ lệ động SNR
+        frames = samples[:frame_count * frame_size].reshape(frame_count, frame_size)
+        frame_rms = np.sqrt(np.mean(np.square(frames), axis=1))
+        noise_floor = max(float(np.percentile(frame_rms, 20)), 1e-6)
+        active_threshold = max(min_rms, noise_floor * 1.60)
+        active_mask = frame_rms >= active_threshold
+        active_seconds = float(np.count_nonzero(active_mask) * 0.03)
+        dynamic_ratio = float(np.percentile(frame_rms, 90) / noise_floor)
+
+        min_active_seconds = float(os.getenv('COSMOS_AUDIO_MIN_ACTIVE_SECONDS', '0.36'))
+        min_dynamic_ratio = float(os.getenv('COSMOS_AUDIO_MIN_DYNAMIC_RATIO', '1.44'))
+
+        if active_seconds < min_active_seconds or dynamic_ratio < min_dynamic_ratio:
+            return {
+                'status': 'ok',
+                'captured_at': captured_at,
+                'channel': channel,
+                'transcription_ms': 0,
+                'text': '',
+                'speech_detected': False,
+                'ignored_reason': f'stationary_noise (act={active_seconds:.2f}s, dyn={dynamic_ratio:.2f})',
+                'audio_rms': round(rms, 6),
+                'audio_peak': round(peak, 6),
+                'audio_source': source + ' (local)',
+                'audio_sha256': hashlib.sha256(wav_bytes).hexdigest(),
+                'audio_model': os.getenv('COSMOS_AUDIO_MODEL', 'vinai/PhoWhisper-small'),
+            }
+
+        # Tầng 3: Kiểm tra dải phổ giọng nói con người (300Hz - 3400Hz)
+        fft = np.abs(np.fft.rfft(samples))
+        freqs = np.fft.rfftfreq(len(samples), 1 / 16000)
+        speech_band = np.sum(fft[(freqs >= 300) & (freqs <= 3400)])
+        total_band = np.sum(fft) + 1e-6
+        speech_ratio = speech_band / total_band
+
+        if speech_ratio < 0.30:
+            return {
+                'status': 'ok',
+                'captured_at': captured_at,
+                'channel': channel,
+                'transcription_ms': 0,
+                'text': '',
+                'speech_detected': False,
+                'ignored_reason': f'non_speech_spectrum (speech_ratio={speech_ratio:.2f})',
+                'audio_rms': round(rms, 6),
+                'audio_peak': round(peak, 6),
+                'audio_source': source + ' (local)',
+                'audio_sha256': hashlib.sha256(wav_bytes).hexdigest(),
+                'audio_model': os.getenv('COSMOS_AUDIO_MODEL', 'vinai/PhoWhisper-small'),
+            }
+
+        # Tầng 4: Chuẩn hóa an toàn (Chỉ scale nhẹ nếu có âm thanh rõ ràng, tuyệt đối không khuếch đại tạp âm nền)
+        if peak > 0.15:
+            normalized_samples = (samples / peak * 0.85).astype(np.float32)
+        else:
+            normalized_samples = samples
+
+        if self._local_audio_pipeline is None:
+            self.audio_status.emit('Tiếng nói: đang nạp mô hình PhoWhisper vào bộ nhớ...')
+            import torch
+            from transformers import AutoModelForSpeechSeq2Seq, AutoProcessor, pipeline
+
+            model_id = os.getenv('COSMOS_AUDIO_MODEL', 'vinai/PhoWhisper-small').strip() or 'vinai/PhoWhisper-small'
+            use_cuda = torch.cuda.is_available()
+            if not use_cuda:
+                # Giới hạn 2 luồng CPU để không chiếm dụng CPU, giữ luồng render video luôn mượt 100%
+                torch.set_num_threads(min(2, os.cpu_count() or 2))
+            dtype = torch.float16 if use_cuda else torch.float32
+            if use_cuda:
+                torch.backends.cudnn.benchmark = True
+            model = AutoModelForSpeechSeq2Seq.from_pretrained(
+                model_id, torch_dtype=dtype, low_cpu_mem_usage=True, use_safetensors=False
+            )
+            if use_cuda:
+                model.to('cuda')
+            model.eval()
+            processor = AutoProcessor.from_pretrained(model_id)
+            self._local_audio_pipeline = pipeline(
+                'automatic-speech-recognition',
+                model=model,
+                tokenizer=processor.tokenizer,
+                feature_extractor=processor.feature_extractor,
+                dtype=dtype,
+                device=0 if use_cuda else -1,
+                max_new_tokens=128,
+            )
+            # Warm up pipeline to eliminate cold-start lag
+            try:
+                with torch.inference_mode():
+                    dummy = np.zeros(16000, dtype=np.float32)
+                    self._local_audio_pipeline(dummy, generate_kwargs={'task': 'transcribe', 'num_beams': 1, 'max_new_tokens': 8})
+            except Exception:
+                pass
+
+        t0 = time.perf_counter()
+        try:
+            import torch
+            import re
+            beam_size = int(os.getenv('COSMOS_AUDIO_BEAM_SIZE', '1'))
+            gen_kwargs = {
+                'task': 'transcribe',
+                'do_sample': False,
+                'num_beams': beam_size,
+                'condition_on_prev_tokens': False,
+                'temperature': 0.0,
+                'repetition_penalty': 1.35,
+                'no_repeat_ngram_size': 3,
+            }
+            lang = os.getenv('COSMOS_AUDIO_LANGUAGE', 'vi').strip() or 'vi'
+            if lang != 'auto':
+                gen_kwargs['language'] = lang
+            with torch.inference_mode():
+                res = self._local_audio_pipeline(normalized_samples, generate_kwargs=gen_kwargs)
+            text = ' '.join(str(res.get('text', '')).split()).strip()
+
+            # Tầng 5 & 6: Bộ lọc kiểm định tốc độ nói & chống ảo giác triệt để
+            if text:
+                text_clean = text.strip()
+                text_lower = text_clean.lower()
+                words = re.findall(r'\w+', text_lower, flags=re.UNICODE)
+                word_count = len(words)
+
+                # 5.1: Kiểm tra tính hợp lý của tốc độ nói (Speech Rate Plausibility)
+                # Tốc độ nói tiếng Việt tự nhiên ~ 2.5 - 3.5 từ/giây. Giới hạn 5.0 từ/giây để không chặn người nói nhanh
+                if word_count > 0 and (word_count / max(active_seconds, 0.2)) > 5.0:
+                    text = ''
+
+                # 5.2: Kiểm tra đa dạng từ vựng (chống vòng lặp lặp từ)
+                elif word_count >= 6 and (len(set(words)) / word_count < 0.45):
+                    text = ''
+
+                # 5.3: Danh sách đen các cụm từ ảo giác phổ biến
+                else:
+                    hallucinations = [
+                        'cảm ơn các bạn đã xem', 'cảm ơn các bạn đã theo dõi', 'cảm ơn đã xem',
+                        'hãy like và subscribe', 'đăng ký kênh', 'hãy đăng ký', 'subscribe',
+                        'hẹn gặp lại', 'chúc các bạn', 'nhiều doanh nghiệp đã', 'nhiều người đã đặt',
+                        'đoàn kệ thời gian', 'tới gói sáp', 'tới phết cổ', 'tinh thần tái diễn',
+                        'nàng thông cáo', 'nhà hàng đầu có thể', 'nàng hơi', 'lalaschool',
+                        'thanks for watching', 'subtitles by', 'bản quyền thuộc về'
+                    ]
+                    if any(h in text_lower for h in hallucinations) or len(text_clean) < 2:
+                        text = ''
+
+            latency = int((time.perf_counter() - t0) * 1000)
+            return {
+                'status': 'ok',
+                'captured_at': captured_at,
+                'channel': channel,
+                'transcription_ms': latency,
+                'text': text,
+                'speech_detected': bool(text),
+                'audio_rms': round(rms, 6),
+                'audio_peak': round(peak, 6),
+                'audio_active_seconds': round(active_seconds, 2),
+                'audio_source': source + ' (local)',
+                'audio_sha256': hashlib.sha256(wav_bytes).hexdigest(),
+                'audio_model': os.getenv('COSMOS_AUDIO_MODEL', 'vinai/PhoWhisper-small'),
+            }
+        except Exception:
+            return {
+                'status': 'ok',
+                'captured_at': captured_at,
+                'channel': channel,
+                'transcription_ms': 0,
+                'text': '',
+                'speech_detected': False,
+                'audio_rms': round(rms, 6),
+                'audio_peak': round(peak, 6),
+                'audio_source': source + ' (local)',
+                'audio_sha256': hashlib.sha256(wav_bytes).hexdigest(),
+                'audio_model': os.getenv('COSMOS_AUDIO_MODEL', 'vinai/PhoWhisper-small'),
+            }
+
+    def _capture_and_transcribe_audio(self, captured_at, ctx, cancel):
         try:
             source = os.getenv('COSMOS_AUDIO_SOURCE', 'sdk').strip().lower()
-            completed = self._capture_audio_from_rtsp() if source == 'rtsp' else self._capture_audio_from_sdk()
-            if completed.returncode != 0:
-                detail = completed.stderr.decode('utf-8', 'replace').strip().splitlines()[-1:]
-                raise RuntimeError(self._safe_audio_error(
-                    detail[0] if detail else 'FFmpeg không lấy được audio từ RTSP'
-                ))
-            if len(completed.stdout) < 1024:
-                raise RuntimeError('Không nhận được âm thanh từ camera')
-            channel = self.Channel_comboBox.currentData()
+            mode = os.getenv('COSMOS_AUDIO_MODE', 'local').strip().lower()
+            completed, wav_bytes = self._capture_audio_from_rtsp(ctx, cancel) if source == 'rtsp' else self._capture_audio_from_sdk(ctx, cancel)
+            if completed is None or cancel.is_set() or not wav_bytes:
+                return
+
+            channel = ctx['channel']
             debug_path, audio_sha256 = self._save_audio_debug_sample(
-                completed.stdout, captured_at, source, channel
+                wav_bytes, captured_at, source, channel
             )
-            endpoint = self.cosmos_url.rsplit('/', 1)[0] + '/transcribe'
-            req = urlrequest.Request(endpoint, data=completed.stdout, headers={
+
+            if mode == 'local':
+                payload = self._transcribe_locally(wav_bytes, captured_at, source, channel)
+                payload['audio_debug_path'] = debug_path
+                self.audio_result.emit(payload)
+                return
+
+            endpoint = self._transcribe_url()
+            req = urlrequest.Request(endpoint, data=wav_bytes, headers={
                 'Content-Type': 'application/octet-stream',
-                'X-Cosmos-Device-Id': os.getenv('COSMOS_DEVICE_ID', self.IP_lineEdit.text().strip()),
+                'X-Cosmos-Device-Id': os.getenv('COSMOS_DEVICE_ID', ctx['host']),
                 'X-Cosmos-Channel': str(channel if channel is not None else ''),
                 'X-Cosmos-Captured-At': captured_at,
                 'X-Cosmos-Audio-Source': source,
                 'X-Cosmos-Audio-Sha256': audio_sha256,
             }, method='POST')
-            with urlrequest.urlopen(req, timeout=float(os.getenv('COSMOS_AUDIO_TIMEOUT_SECONDS', '120'))) as response:
-                payload = json.loads(response.read().decode('utf-8'))
-                payload['audio_debug_path'] = debug_path
-                self.audio_result.emit(payload)
+            try:
+                with urlrequest.urlopen(req, timeout=float(os.getenv('COSMOS_AUDIO_TIMEOUT_SECONDS', '120'))) as response:
+                    payload = json.loads(response.read().decode('utf-8'))
+                    payload['audio_debug_path'] = debug_path
+                    self.audio_result.emit(payload)
+            except Exception as net_err:
+                fallback_local = os.getenv('COSMOS_AUDIO_FALLBACK_LOCAL', '1').strip().lower() in {'1', 'true', 'yes'}
+                if fallback_local:
+                    self.audio_status.emit('Tiếng nói: Service không hoạt động, chuyển sang PhoWhisper nội bộ...')
+                    payload = self._transcribe_locally(wav_bytes, captured_at, source, channel)
+                    payload['audio_debug_path'] = debug_path
+                    self.audio_result.emit(payload)
+                else:
+                    raise net_err
         except HTTPError as exc:
             self.audio_status.emit('Tiếng nói: {} {}'.format(exc.code, exc.read().decode('utf-8', 'replace')[:100]))
         except subprocess.TimeoutExpired:
@@ -497,10 +881,10 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
                 )
             else:
                 self.audio_status.emit('Tiếng nói: FFmpeg xử lý đoạn media quá thời gian.')
-        except (URLError, TimeoutError) as exc:
-            self.audio_status.emit('Tiếng nói: không kết nối được ({})'.format(exc))
+        except (URLError, TimeoutError, ConnectionError, OSError) as exc:
+            self.audio_status.emit('Tiếng nói: không kết nối được dịch vụ ({})'.format(exc))
         except Exception as exc:
-            self.audio_status.emit('Tiếng nói: lỗi ({})'.format(self._safe_audio_error(exc)))
+            self.audio_status.emit('Tiếng nói: {}'.format(self._safe_audio_error(exc, ctx)))
         finally:
             self._audio_inflight = False
 
@@ -558,13 +942,15 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
             self.cosmos_result.emit(payload)
         except HTTPError as exc:
             if exc.code == 429:
-                self.cosmos_status.emit('Cosmos: đang phân tích khung hình trước...')
+                self.cosmos_status.emit('Cosmos: đang xử lý khung hình trước...')
+            elif exc.code == 500:
+                self.cosmos_status.emit('Cosmos: khung hình phức tạp, đang lấy mẫu tiếp theo...')
             else:
-                self.cosmos_status.emit('Cosmos: {} {}'.format(exc.code, exc.read().decode('utf-8', 'replace')[:100]))
+                self.cosmos_status.emit('Cosmos: mã lỗi HTTP {}'.format(exc.code))
         except (URLError, TimeoutError, ValueError) as exc:
             self.cosmos_status.emit('Cosmos: không kết nối được ({})'.format(exc))
         except Exception as exc:
-            self.cosmos_status.emit('Cosmos: lỗi phân tích ({})'.format(exc))
+            self.cosmos_status.emit('Cosmos: đang kết nối lại...')
         finally:
             self._inference_inflight = False
 
@@ -580,7 +966,11 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
         if self._last_replay:
             self._add_replay_event(self._last_replay)
         self.cosmos_label.setText('Cosmos: đã nhận kết quả phân tích')
-        self.cosmos_log.appendPlainText(text)
+        current = self.cosmos_log.toPlainText().strip()
+        if current:
+            self.cosmos_log.setPlainText(text + '\n' + current)
+        else:
+            self.cosmos_log.setPlainText(text)
 
     def _add_replay_event(self, replay):
         """Keep a bounded, in-session list; the server retains the JSONL audit history."""
@@ -621,42 +1011,95 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
 
     def _show_cosmos_status(self, text):
         self.cosmos_label.setText(text)
-        self.cosmos_log.appendPlainText(text)
 
     def _show_audio_result(self, payload):
         text = str(payload.get('text', '')).strip()
-        if not payload.get('speech_detected', bool(text)):
-            self.audio_label.setText('Tiếng nói: chưa có lời nói rõ ràng')
-            return
-        self.audio_label.setText('Tiếng nói: đã nhận văn bản')
+        rms = float(payload.get('audio_rms', 0.0))
+        peak = float(payload.get('audio_peak', 0.0))
         channel = payload.get('channel')
         try:
             channel_label = 'Kênh {}'.format(int(channel) + 1)
         except (TypeError, ValueError):
             channel_label = 'Kênh ?'
-        source = str(payload.get('audio_source', 'unknown')).upper()
-        evidence = '{} {} | RMS {} | active {}s | SHA {}'.format(
-            source, channel_label, payload.get('audio_rms', '?'),
-            payload.get('active_speech_seconds', '?'), str(payload.get('audio_sha256', ''))[:12]
-        )
-        audio_model = payload.get('audio_model')
-        if audio_model:
-            evidence += ' | ASR {}'.format(audio_model)
-        debug_path = payload.get('audio_debug_path')
-        if debug_path:
-            evidence += '\nMẫu kiểm tra: {}'.format(debug_path)
-        self.audio_log.appendPlainText('{} | {} ms | {}\n{}'.format(
-            payload.get('captured_at', ''), payload.get('transcription_ms', '?'), evidence, text
-        ))
+
+        captured_at = payload.get('captured_at', '')
+        stamp = captured_at.replace('T', ' ')[:19] if captured_at else ''
+
+        if not payload.get('speech_detected', bool(text)) or not text:
+            if rms < 0.012:
+                self.audio_label.setText(f'Tiếng nói: [{channel_label}] Yên tĩnh (RMS: {rms:.4f}) — Không có người nói')
+            else:
+                level_pct = min(100, int(peak * 100))
+                self.audio_label.setText(f'Tiếng nói: [{channel_label}] Âm lượng {level_pct}% (RMS: {rms:.4f}) — Tạp âm/Đang lắng nghe')
+            return
+
+        level_pct = min(100, int(peak * 100))
+        self.audio_label.setText(f'Tiếng nói: [{stamp} - {channel_label} - Âm lượng {level_pct}%] {text[:50]}...')
+
+        # Chỉ ghi nội dung có lời nói thực tế đã qua xác thực vào khung nhật ký
+        log_line = f"[{stamp} - {channel_label}]: {text}"
+        self.audio_log.appendPlainText(log_line)
+
+        self._live_transcripts.append({
+            'captured_at': stamp,
+            'channel': channel_label,
+            'text': text,
+            'rms': rms,
+            'peak': peak,
+            'latency_ms': payload.get('transcription_ms', 0),
+            'model': payload.get('audio_model', 'PhoWhisper'),
+        })
+
+    def _copy_audio_log(self):
+        text = self.audio_log.toPlainText().strip()
+        if not text:
+            QMessageBox.information(self, 'Thông báo', 'Chưa có nhật ký tiếng nói để sao chép.')
+            return
+        clipboard = QApplication.clipboard()
+        clipboard.setText(text)
+        self.audio_label.setText('Tiếng nói: đã sao chép nhật ký vào Clipboard')
+
+    def _save_audio_log(self):
+        if not self._live_transcripts:
+            text = self.audio_log.toPlainText().strip()
+            if not text:
+                QMessageBox.information(self, 'Thông báo', 'Chưa có nhật ký tiếng nói để lưu.')
+                return
+            save_path, _ = QFileDialog.getSaveFileName(self, 'Lưu nhật ký tiếng nói', 'camera_audio_log.txt', 'Text Files (*.txt)')
+            if save_path:
+                Path(save_path).write_text(text, encoding='utf-8')
+                QMessageBox.information(self, 'Thành công', f'Đã lưu kết quả vào:\n{save_path}')
+            return
+
+        save_path, _ = QFileDialog.getSaveFileName(self, 'Lưu nhật ký tiếng nói', 'camera_transcript.txt', 'Text Files (*.txt);;SubRip Subtitles (*.srt)')
+        if not save_path:
+            return
+        if save_path.lower().endswith('.srt'):
+            srt_lines = []
+            for idx, item in enumerate(self._live_transcripts, 1):
+                srt_lines.append(str(idx))
+                srt_lines.append('00:00:00,000 --> 00:00:10,000')
+                srt_lines.append(item['text'])
+                srt_lines.append('')
+            Path(save_path).write_text('\n'.join(srt_lines), encoding='utf-8')
+        else:
+            lines = [f"[{item['captured_at']} - {item['channel']}]: {item['text']}" for item in self._live_transcripts]
+            Path(save_path).write_text('\n'.join(lines), encoding='utf-8')
+        QMessageBox.information(self, 'Thành công', f'Đã lưu kết quả vào:\n{save_path}')
+
+    def _clear_audio_log(self):
+        self.audio_log.clear()
+        self._live_transcripts.clear()
+        self.audio_label.setText('Tiếng nói: đã dọn nhật ký')
 
     def _show_audio_status(self, text):
+        # Chỉ cập nhật nhãn trạng thái, KHÔNG ghi đè thông báo hệ thống vào khung văn bản nói chuyện
         self.audio_label.setText(text)
-        self.audio_log.appendPlainText(text)
 
     def _shutdown_cosmos_if_enabled(self):
         if not self.cosmos_stop_on_exit:
             return
-        shutdown_url = self.cosmos_url.rsplit('/', 1)[0] + '/shutdown'
+        shutdown_url = self._shutdown_url()
         try:
             req = urlrequest.Request(shutdown_url, data=b'', method='POST')
             urlrequest.urlopen(req, timeout=2).close()
@@ -759,9 +1202,11 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
         self.audio_check.setEnabled(True)
         self.sound_btn.setEnabled(True)
         self._set_sound_state(False)
+        self.audio_check.setChecked(True)
         self.statusbar.showMessage('Đang xem Kênh {} ({})'.format(channel + 1, self.StreamTyp_comboBox.currentText()))
 
     def _stop_preview(self):
+        self._cancel_audio_capture()
         if not self._is_playing():
             return
         self.ai_check.setChecked(False)
@@ -787,6 +1232,9 @@ class MyMainWindow(QMainWindow, Ui_MainWindow):
         self.connection_changed.emit(True)
 
     def closeEvent(self, event):
+        self.sample_timer.stop()
+        self.audio_timer.stop()
+        self._cancel_audio_capture()
         self._stop_preview()
         if self._is_logged_in():
             self.sdk.Logout(self.loginID)

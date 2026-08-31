@@ -10,21 +10,36 @@ from NetSDK.SDK_Enum import *
 from NetSDK.SDK_Callback import fDisConnect, fHaveReConnect,fMessCallBackEx1
 from connection_preferences import load_connection
 
-global hwnd
+from PyQt5.QtCore import Qt, pyqtSignal
+
+hwnd = None
+
 @WINFUNCTYPE(None, c_long, C_LLONG, POINTER(c_char), C_DWORD, POINTER(c_char), c_long, c_int, c_long, C_LDWORD)
-def MessCallback(lCommand, lLoginID, pBuf, dwBufLen ,pchDVRIP, nDVRPort, bAlarmAckFlag, nEventID, dwUser):
-    if(lLoginID != hwnd.loginID):
+def MessCallback(lCommand, lLoginID, pBuf, dwBufLen, pchDVRIP, nDVRPort, bAlarmAckFlag, nEventID, dwUser):
+    if hwnd is None or lLoginID != getattr(hwnd.loginID, 'value', hwnd.loginID):
         return
-    if(lCommand == SDK_ALARM_TYPE.EVENT_MOTIONDETECT):
-        print('Enter MessCallback')
-        buf = cast(pBuf, POINTER(ALARM_MOTIONDETECT_INFO)).contents
-        hwnd.update_buf(buf)
-        hwnd.update_ui()
+    if lCommand == SDK_ALARM_TYPE.EVENT_MOTIONDETECT and pBuf:
+        try:
+            buf = cast(pBuf, POINTER(ALARM_MOTIONDETECT_INFO)).contents
+            data = {
+                'year': int(buf.UTC.dwYear), 'month': int(buf.UTC.dwMonth), 'day': int(buf.UTC.dwDay),
+                'hour': int(buf.UTC.dwHour), 'minute': int(buf.UTC.dwMinute), 'second': int(buf.UTC.dwSecond),
+                'channel': int(buf.nChannelID),
+                'action': int(buf.nEventAction),
+            }
+            hwnd.alarm_signal.emit(data)
+        except Exception as exc:
+            print(f"MessCallback error: {exc}")
 
 class StartListenWnd(QMainWindow, Ui_MainWindow):
+    alarm_signal = pyqtSignal(dict)
+
     def __init__(self):
+        global hwnd
         super(StartListenWnd, self).__init__()
+        hwnd = self
         self.setupUi(self)
+        self.alarm_signal.connect(self._on_alarm_received)
         # 界面初始化
         self.init_ui()
 
@@ -38,8 +53,8 @@ class StartListenWnd(QMainWindow, Ui_MainWindow):
         self.sdk.InitEx(self.m_DisConnectCallBack)
         self.sdk.SetAutoReconnect(self.m_ReConnectCallBack)
 
-        #设置报警回调函数
-        self.sdk.SetDVRMessCallBackEx1(MessCallback,0)
+        # 设置报警回调函数
+        self.sdk.SetDVRMessCallBackEx1(MessCallback, 0)
 
 
     def init_ui(self):
@@ -135,34 +150,25 @@ class StartListenWnd(QMainWindow, Ui_MainWindow):
             self.loginID = 0
         self.sdk.Cleanup()
 
+    def _on_alarm_received(self, data: dict):
+        action_map = {0: 'Xung', 1: 'Bắt đầu', 2: 'Kết thúc'}
+        action_text = action_map.get(data.get('action', 0), 'Không rõ')
+        time_str = f"{data.get('year')}-{data.get('month'):02d}-{data.get('day'):02d} {data.get('hour'):02d}:{data.get('minute'):02d}:{data.get('second'):02d}"
+
+        row = self.Alarmlisten_tableWidget.rowCount()
+        self.Alarmlisten_tableWidget.setRowCount(row + 1)
+        self.Alarmlisten_tableWidget.setItem(row, 0, QTableWidgetItem(str(row + 1)))
+        self.Alarmlisten_tableWidget.setItem(row, 1, QTableWidgetItem(time_str))
+        self.Alarmlisten_tableWidget.setItem(row, 2, QTableWidgetItem(str(data.get('channel', 0))))
+        self.Alarmlisten_tableWidget.setItem(row, 3, QTableWidgetItem('Phát hiện chuyển động'))
+        self.Alarmlisten_tableWidget.setItem(row, 4, QTableWidgetItem(action_text))
+        self.Alarmlisten_tableWidget.scrollToBottom()
+
     def update_buf(self, buf):
-        self.buf = buf
+        pass
 
     def update_ui(self):
-        self.Alarmlisten_tableWidget.setRowCount(self.row + 1)
-        item = QTableWidgetItem(str(self.row + 1))
-        self.Alarmlisten_tableWidget.setItem(self.row, self.column, item)
-        item1 = QTableWidgetItem('{0}-{1}-{2} {3}:{4}:{5}'.format(str(self.buf.UTC.dwYear), str(self.buf.UTC.dwMonth),
-                                                                  str(self.buf.UTC.dwDay),
-                                                                  str(self.buf.UTC.dwHour), str(self.buf.UTC.dwMinute),
-                                                                  str(self.buf.UTC.dwSecond)))
-        self.Alarmlisten_tableWidget.setItem(self.row, self.column + 1, item1)
-        item2 = QTableWidgetItem(str(self.buf.nChannelID))
-        self.Alarmlisten_tableWidget.setItem(self.row, self.column + 2, item2)
-        item3 = QTableWidgetItem('Phát hiện chuyển động')
-        self.Alarmlisten_tableWidget.setItem(self.row, self.column + 3, item3)
-        if(self.buf.nEventAction == 0):
-            item4 = QTableWidgetItem('Xung')
-            self.Alarmlisten_tableWidget.setItem(self.row, self.column + 4, item4)
-        elif(self.buf.nEventAction == 1):
-            item4 = QTableWidgetItem('Bắt đầu')
-            self.Alarmlisten_tableWidget.setItem(self.row, self.column + 4, item4)
-        elif(self.buf.nEventAction == 2):
-            item4 = QTableWidgetItem('Kết thúc')
-            self.Alarmlisten_tableWidget.setItem(self.row, self.column + 4, item4)
-        self.row += 1
-        self.Alarmlisten_tableWidget.update()
-        self.Alarmlisten_tableWidget.viewport().update()
+        pass
 
     # 实现断线回调函数功能
     def DisConnectCallBack(self, lLoginID, pchDVRIP, nDVRPort, dwUser):

@@ -54,6 +54,25 @@ local_env\.venv\Scripts\python.exe -m streamlit run app\streamlit_app.py
 
 Dieu nay tranh loi chay nham `streamlit` global.
 
+### 3.1) Demo chuyen am thanh thanh text tu video
+
+Neu muon test nhanh mot demo phan tich am thanh tu video da chon, chay:
+
+```bat
+call local_env\.venv\Scripts\activate
+streamlit run app\audio_to_text_demo.py
+```
+
+Demo nay cho phep:
+
+- Chon file video tu may (upload hoac nhap duong dan local)
+- Trich xuat audio bang ffmpeg
+- Dung Whisper de chuyen thanh text
+- Hien ket qua transcript va phan theo tung doan thoi gian
+- Tai file text ket qua ve may
+
+Ket qua se duoc luu trong `outputs\audio_demo\`.
+
 ## 4) Dependency va version
 
 ### 4.1 Requirements khai bao trong repo

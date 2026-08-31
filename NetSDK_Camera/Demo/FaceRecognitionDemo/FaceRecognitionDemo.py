@@ -29,7 +29,9 @@ def AnalyzerDataCallBack(lAnalyzerHandle, dwAlarmType, pAlarmInfo, pBuffer, dwBu
 
 class MyMainWindow(QMainWindow, Ui_MainWindow):
     def __init__(self, parent=None):
+        global wnd
         super(MyMainWindow, self).__init__(parent)
+        wnd = self
         self.setupUi(self)
 
         # 界面初始化

@@ -9,19 +9,29 @@ from NetSDK.SDK_Struct import *
 from NetSDK.SDK_Callback import fDisConnect, fHaveReConnect
 from connection_preferences import load_connection
 
-wnd = None  # được launcher gán sau khi khởi tạo CaptureWnd
+from PyQt5.QtCore import pyqtSignal
+
+wnd = None
 
 @WINFUNCTYPE(None, C_LLONG, POINTER(c_ubyte), c_uint, c_uint, C_DWORD, C_LDWORD)
-def CaptureCallBack(lLoginID,pBuf,RevLen,EncodeType,CmdSerial,dwUser):
-    if lLoginID == 0:
+def CaptureCallBack(lLoginID, pBuf, RevLen, EncodeType, CmdSerial, dwUser):
+    if lLoginID == 0 or not pBuf or RevLen == 0 or wnd is None:
         return
-    print('Enter CaptureCallBack')
-    wnd.update_ui(pBuf, RevLen, EncodeType)
+    try:
+        data = bytes(cast(pBuf, POINTER(c_ubyte * RevLen)).contents)
+        wnd.snap_received.emit(data)
+    except Exception as exc:
+        print(f"CaptureCallBack error: {exc}")
 
 class CaptureWnd(QMainWindow, Ui_MainWindow):
+    snap_received = pyqtSignal(bytes)
+
     def __init__(self):
+        global wnd
         super(CaptureWnd, self).__init__()
+        wnd = self
         self.setupUi(self)
+        self.snap_received.connect(self._on_snap_received)
         # 界面初始化
         self.init_ui()
 
@@ -73,13 +83,13 @@ class CaptureWnd(QMainWindow, Ui_MainWindow):
             self.Logout_pushButton.setEnabled(True)
             if(int(device_info.nChanNum) > 0):
                 self.Capture_pushButton.setEnabled(True)
+            self.Channel_comboBox.clear()
             for i in range(int(device_info.nChanNum)):
                 self.Channel_comboBox.addItem(str(i))
         else:
             QMessageBox.about(self, 'Thông báo', error_msg)
 
     def logout_btn_onclick(self):
-        # 登出
         if (self.loginID == 0):
             return
         result = self.sdk.Logout(self.loginID)
@@ -92,7 +102,6 @@ class CaptureWnd(QMainWindow, Ui_MainWindow):
         self.Picture_label.clear()
 
     def capture_btn_onclick(self):
-        # 设置抓图回调
         dwUser = 0
         self.sdk.SetSnapRevCallBack(CaptureCallBack, dwUser)
         channel = self.Channel_comboBox.currentIndex()
@@ -100,27 +109,20 @@ class CaptureWnd(QMainWindow, Ui_MainWindow):
         snap.Channel = channel
         snap.Quality = 1
         snap.mode = 0
-        # 抓图
         self.sdk.SnapPictureEx(self.loginID, snap)
 
+    def _on_snap_received(self, image_data: bytes):
+        pixmap = QPixmap()
+        if pixmap.loadFromData(image_data):
+            scaled = pixmap.scaled(self.Picture_label.width(), self.Picture_label.height())
+            self.Picture_label.setPixmap(scaled)
 
-    def update_ui(self, pBuf, RevLen, EncodeType):
-        pic_buf = cast(pBuf, POINTER(c_ubyte*RevLen)).contents
-        with open('./capture.jpg', 'wb+') as f:
-            f.write(pic_buf)
-        image = QPixmap('./capture.jpg').scaled(self.Picture_label.width(),
-                                                        self.Picture_label.height())
-        self.Picture_label.setPixmap(image)
-	
-	# 实现断线回调函数功能
     def DisConnectCallBack(self, lLoginID, pchDVRIP, nDVRPort, dwUser):
         self.setWindowTitle("Chụp ảnh - Ngoại tuyến")
 
-    # 实现断线重连回调函数功能
     def ReConnectCallBack(self, lLoginID, pchDVRIP, nDVRPort, dwUser):
         self.setWindowTitle('Chụp ảnh - Trực tuyến')
 
-    # 关闭主窗口时清理资源
     def closeEvent(self, event):
         event.accept()
         if self.loginID:

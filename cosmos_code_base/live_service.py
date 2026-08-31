@@ -9,6 +9,7 @@ GET /health trả {"status": "loading"} ngay khi server còn đang load model.
 """
 
 import argparse
+import difflib
 import hashlib
 import io
 import json
@@ -305,34 +306,70 @@ def _audio_beam_size() -> int:
         return 5
 
 
+def _audio_min_rms() -> float:
+    """Return a conservative floor so camera noise is not sent to Whisper."""
+    try:
+        # Values below this regularly classify low-level DVR hiss as speech.
+        return min(0.1, max(0.004, float(os.getenv("COSMOS_AUDIO_MIN_RMS", "0.008"))))
+    except ValueError:
+        return 0.008
+
+
+def _audio_requires_decoder_agreement() -> bool:
+    """Fail closed when two deterministic decodes disagree on the spoken text."""
+    return os.getenv("COSMOS_AUDIO_REQUIRE_DECODER_AGREEMENT", "false").strip().lower() in {
+        "1", "true", "yes", "on",
+    }
+
+
+def _audio_transcripts_agree(primary: str, verifier: str) -> bool:
+    """Accept only substantially matching decodes; never rewrite either transcript."""
+    primary_folded = _fold_text(primary)
+    verifier_folded = _fold_text(verifier)
+    if not primary_folded or not verifier_folded:
+        return not primary_folded and not verifier_folded
+    return difflib.SequenceMatcher(None, primary_folded, verifier_folded).ratio() >= 0.72
+
+
 def _get_audio_transcriber():
     """Load Vietnamese-specialized Whisper lazily so image-only monitoring stays light."""
     global _audio_transcriber
     if _audio_transcriber is None:
+        import numpy as np
         import torch
         from transformers import AutoModelForSpeechSeq2Seq, AutoProcessor, pipeline
 
         model_id = _active_audio_model_id()
         use_cuda = torch.cuda.is_available()
         dtype = torch.float16 if use_cuda else torch.float32
+        if use_cuda:
+            torch.backends.cudnn.benchmark = True
         model = AutoModelForSpeechSeq2Seq.from_pretrained(
             model_id,
             torch_dtype=dtype,
             low_cpu_mem_usage=True,
-            use_safetensors=True,
+            use_safetensors=False,
         )
         if use_cuda:
             model.to("cuda")
+        model.eval()
         processor = AutoProcessor.from_pretrained(model_id)
         _audio_transcriber = pipeline(
             "automatic-speech-recognition",
             model=model,
             tokenizer=processor.tokenizer,
             feature_extractor=processor.feature_extractor,
-            torch_dtype=dtype,
+            dtype=dtype,
             device=0 if use_cuda else -1,
             max_new_tokens=128,
         )
+        # Warm up pipeline to eliminate first-request cold-start latency
+        try:
+            with torch.inference_mode():
+                dummy_audio = np.zeros(16000, dtype=np.float32)
+                _audio_transcriber(dummy_audio, generate_kwargs={"task": "transcribe", "num_beams": 1, "max_new_tokens": 8})
+        except Exception:
+            pass
     return _audio_transcriber
 
 
@@ -360,31 +397,51 @@ def _pcm16_wav_rms(body: bytes) -> float:
 
 
 def _has_speech_activity(body: bytes, min_rms: float) -> tuple[bool, float, float]:
-    """Conservative energy VAD: speech must rise above the chunk's stationary noise floor."""
+    """Multi-stage conservative energy VAD: speech must rise above the chunk's stationary noise floor."""
     import numpy as np
 
     samples = _pcm16_wav_samples(body)
-    rms = float(np.sqrt(np.mean(np.square(samples)))) if samples.size else 0.0
-    frame_size = 480  # 30 ms at the fixed 16 kHz client sample rate.
+    if samples.size == 0:
+        return False, 0.0, 0.0
+    samples = samples - np.mean(samples)
+    rms = float(np.sqrt(np.mean(np.square(samples))))
+    peak = float(np.max(np.abs(samples))) if samples.size else 0.0
+    min_peak = float(os.getenv("COSMOS_AUDIO_MIN_PEAK", "0.064"))
+    frame_size = 480  # 30 ms at 16 kHz
     frame_count = samples.size // frame_size
-    if rms < min_rms or frame_count < 4:
+    if rms < min_rms or peak < min_peak or frame_count < 8:
         return False, rms, 0.0
     frames = samples[:frame_count * frame_size].reshape(frame_count, frame_size)
     frame_rms = np.sqrt(np.mean(np.square(frames), axis=1))
     noise_floor = max(float(np.percentile(frame_rms, 20)), 1e-6)
-    active_threshold = max(min_rms, noise_floor * 1.8)
-    active_seconds = float(np.count_nonzero(frame_rms >= active_threshold) * 0.03)
+    active_threshold = max(min_rms, noise_floor * 1.60)
+    active_mask = frame_rms >= active_threshold
+    active_seconds = float(np.count_nonzero(active_mask) * 0.03)
     dynamic_ratio = float(np.percentile(frame_rms, 90) / noise_floor)
-    detected = active_seconds >= 0.24 and dynamic_ratio >= 1.35
-    return detected, rms, active_seconds
+
+    min_active_seconds = float(os.getenv("COSMOS_AUDIO_MIN_ACTIVE_SECONDS", "0.36"))
+    min_dynamic_ratio = float(os.getenv("COSMOS_AUDIO_MIN_DYNAMIC_RATIO", "1.44"))
+    if active_seconds < min_active_seconds or dynamic_ratio < min_dynamic_ratio:
+        return False, rms, active_seconds
+
+    # Spectral speech-band check (300Hz - 3400Hz)
+    fft = np.abs(np.fft.rfft(samples))
+    freqs = np.fft.rfftfreq(len(samples), 1 / 16000)
+    speech_band = np.sum(fft[(freqs >= 300) & (freqs <= 3400)])
+    total_band = np.sum(fft) + 1e-6
+    speech_ratio = speech_band / total_band
+    if speech_ratio < 0.30:
+        return False, rms, active_seconds
+
+    return True, rms, active_seconds
 
 
 def _is_repetitive_transcript(text: str) -> bool:
     """Reject common Whisper loops produced from silence and stationary noise."""
     tokens = re.findall(r"\w+", text.casefold(), flags=re.UNICODE)
-    if len(tokens) < 8:
+    if len(tokens) < 6:
         return False
-    if len(set(tokens)) / len(tokens) < 0.30:
+    if len(set(tokens)) / len(tokens) < 0.45:
         return True
     for period in range(1, min(7, len(tokens) // 3 + 1)):
         matches = sum(tokens[index] == tokens[index - period] for index in range(period, len(tokens)))
@@ -403,7 +460,8 @@ def _is_known_audio_hallucination(text: str) -> bool:
     defaults = (
         "hay subscribe|subscribe cho kenh|dang ky kenh|khong bo lo nhung video|"
         "cam on cac ban da xem|cam on cac ban da don xem|hen gap lai cac ban trong nhung video tiep theo|"
-        "lalaschool|thanks for watching"
+        "nhieu doanh nghiep da|nhieu nguoi da dat|doan ke thoi gian|toi goi sap|toi phet co|"
+        "tinh than tai dien|nang thong cao|nha hang dau co the|lalaschool|thanks for watching|subtitles by|ban quyen thuoc ve"
     )
     configured = os.getenv("COSMOS_AUDIO_HALLUCINATION_PHRASES", defaults)
     folded = _fold_text(text)
@@ -465,8 +523,77 @@ def _build_prompt_text(image: Image.Image, detector_context: str = "") -> str:
     return prompt + detector_context
 
 
+def _extract_and_parse_json(output_text: str) -> dict:
+    """Robustly parse JSON from model output, automatically repairing truncated JSON or extracting via regex."""
+    if not output_text or not output_text.strip():
+        return {
+            "summary": "Không nhận được phản hồi từ mô hình",
+            "risk_level": "none",
+            "events": [],
+        }
+
+    parsed = None
+    # 1. Direct JSON parse or substring parse
+    start = output_text.find("{")
+    end = output_text.rfind("}")
+    if start != -1 and end != -1 and end > start:
+        candidate = output_text[start : end + 1]
+        try:
+            val = json.loads(candidate)
+            if isinstance(val, dict):
+                parsed = val
+        except Exception:
+            pass
+
+    # 2. Repair truncated JSON (common when max_new_tokens is reached mid-sentence)
+    if parsed is None and start != -1:
+        candidate = output_text[start:].strip()
+        quote_count = candidate.count('"') - candidate.count(r'\"')
+        if quote_count % 2 != 0:
+            candidate += '"'
+        open_brackets = candidate.count('[') - candidate.count(']')
+        if open_brackets > 0:
+            candidate += ']' * open_brackets
+        open_braces = candidate.count('{') - candidate.count('}')
+        if open_braces > 0:
+            candidate += '}' * open_braces
+        try:
+            val = json.loads(candidate)
+            if isinstance(val, dict):
+                parsed = val
+        except Exception:
+            pass
+
+    # 3. Resilient regex field extraction as ultimate fallback
+    if parsed is None:
+        summary_match = re.search(r'"summary"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)', output_text)
+        risk_match = re.search(r'"risk_level"\s*:\s*"(none|low|medium|high)"', output_text, re.IGNORECASE)
+
+        summary = summary_match.group(1).replace(r'\"', '"') if summary_match else ""
+        if not summary:
+            summary = re.sub(r'[{}\[\]"]', '', output_text).strip()
+        risk_level = risk_match.group(1).lower() if risk_match else "none"
+
+        parsed = {
+            "summary": summary[:2000] if summary else "Giám sát camera trực tiếp bình thường",
+            "risk_level": risk_level,
+            "events": [],
+        }
+
+    # Ensure required standard schema keys are always present
+    if "risk_level" not in parsed:
+        risk_match = re.search(r'"risk_level"\s*:\s*"(none|low|medium|high)"', output_text, re.IGNORECASE)
+        parsed["risk_level"] = risk_match.group(1).lower() if risk_match else "none"
+    if "summary" not in parsed:
+        parsed["summary"] = "Giám sát camera trực tiếp bình thường"
+    if "events" not in parsed or not isinstance(parsed.get("events"), list):
+        parsed["events"] = []
+
+    return parsed
+
+
 def _run_inference(image: Image.Image, detector_context: str = "") -> str:
-    """Chạy inference, trả về chuỗi JSON (chưa parse)."""
+    """Chạy inference, trả về chuỗi text từ model."""
     prompt_text = _build_prompt_text(image, detector_context)
     request = {
         "prompt": prompt_text,
@@ -474,12 +601,6 @@ def _run_inference(image: Image.Image, detector_context: str = "") -> str:
     }
     outputs = _model.generate([request], _sampling_params)
     output_text = outputs[0].outputs[0].text if outputs and outputs[0].outputs else ""
-
-    # Trích JSON nếu model thêm text thừa bên ngoài
-    start = output_text.find("{")
-    end = output_text.rfind("}")
-    if start != -1 and end != -1 and end > start:
-        return output_text[start : end + 1]
     return output_text.strip()
 
 
@@ -602,14 +723,13 @@ def analyze(
 
         inference_ms = int((time.perf_counter() - t0) * 1000)
 
-        try:
-            result = json.loads(result_text)
-        except json.JSONDecodeError as exc:
-            logger.warning("JSON parse failed: %s | raw: %.200s", exc, result_text)
-            return JSONResponse(
-                {"status": "error", "detail": f"model output parse failed: {exc}"},
-                status_code=500,
-            )
+        result = _extract_and_parse_json(result_text)
+        if not isinstance(result, dict):
+            result = {
+                "summary": str(result),
+                "risk_level": "none",
+                "events": [],
+            }
 
         if uniform_detection is not None and isinstance(result, dict):
             staff_count = uniform_detection["yellow_uniform_staff"]
@@ -692,10 +812,7 @@ def transcribe(
             output.write(body)
             wav_path = output.name
         t0 = time.perf_counter()
-        try:
-            min_rms = max(0.0, float(os.getenv("COSMOS_AUDIO_MIN_RMS", "0.003")))
-        except ValueError:
-            min_rms = 0.003
+        min_rms = _audio_min_rms()
         speech_activity, rms, active_seconds = _has_speech_activity(body, min_rms)
         if not speech_activity:
             return {
@@ -719,19 +836,44 @@ def transcribe(
             "task": "transcribe",
             "do_sample": False,
             "num_beams": _audio_beam_size(),
+            # Do not let a weak/noisy chunk inherit words from a preceding
+            # chunk. This notably reduces Whisper's silence hallucinations.
+            "condition_on_prev_tokens": False,
         }
-        if language:
+        if language and language != "auto":
             generate_kwargs["language"] = language
-        result = _get_audio_transcriber()(wav_path, generate_kwargs=generate_kwargs)
-        text = " ".join(str(result.get("text", "")).split())
-        repetitive = _is_repetitive_transcript(text)
-        hallucination = _is_known_audio_hallucination(text)
+        import torch
+
+        with torch.inference_mode():
+            result = _get_audio_transcriber()(wav_path, generate_kwargs=generate_kwargs)
+            text = " ".join(str(result.get("text", "")).split())
+            repetitive = _is_repetitive_transcript(text)
+            hallucination = _is_known_audio_hallucination(text)
+            excessive_rate = False
+            if text:
+                words = re.findall(r"\w+", text.lower(), flags=re.UNICODE)
+                if words and (len(words) / max(active_seconds, 0.2)) > 5.0:
+                    excessive_rate = True
+            decoder_disagreement = False
+            if text and _audio_requires_decoder_agreement():
+                # A beam-search sentence that the greedy decoder cannot reproduce
+                # is commonly language-model completion from weak audio. Reject it
+                # rather than replacing it with a guessed alternative.
+                verifier_kwargs = dict(generate_kwargs)
+                verifier_kwargs["num_beams"] = 1
+                verifier = _get_audio_transcriber()(wav_path, generate_kwargs=verifier_kwargs)
+                verifier_text = " ".join(str(verifier.get("text", "")).split())
+                decoder_disagreement = not _audio_transcripts_agree(text, verifier_text)
         duplicate = _is_duplicate_audio_transcript(text, x_cosmos_device_id or "unknown", x_cosmos_channel)
         ignored_reason = None
         if repetitive:
             ignored_reason = "repetitive_transcript"
         elif hallucination:
             ignored_reason = "known_hallucination"
+        elif excessive_rate:
+            ignored_reason = "hallucination_speech_rate"
+        elif decoder_disagreement:
+            ignored_reason = "decoder_disagreement"
         elif duplicate:
             ignored_reason = "duplicate_transcript"
         if ignored_reason:
@@ -793,8 +935,8 @@ def main() -> None:
     parser.add_argument(
         "--max-new-tokens",
         type=int,
-        default=128,
-        help="Max tokens model sinh ra (default: 512)",
+        default=256,
+        help="Max tokens model sinh ra (default: 256)",
     )
     parser.add_argument(
         "--max-image-side", type=int, default=960, metavar="PIXELS",

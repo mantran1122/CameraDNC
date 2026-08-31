@@ -1,7 +1,4 @@
-# coding=utf-8
 import sys
-import tkinter as tk
-from tkinter import filedialog
 import os
 import json
 import shutil

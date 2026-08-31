@@ -26,7 +26,25 @@ def extract_audio(video_path: str, audio_path: str = None) -> str:
     return audio_path
 
 
-def transcribe_video(video_path: str, model_id: str = "openai/whisper-base", device: str = None) -> dict:
+def transcribe_video(
+    video_path: str,
+    model_id: str = "openai/whisper-base",
+    device: str = None,
+    translate: bool = False,
+    language: str | None = None,
+    max_new_tokens: int = 512,
+    chunk_length_s: int = 30,
+    stride_length_s: int = 5,
+    no_repeat_ngram_size: int = 3,
+) -> dict:
+    """Extract audio from video and transcribe.
+
+    Parameters added to reduce hallucination:
+    - translate: if True, will attempt to translate to English (avoid for fidelity)
+    - language: if provided (e.g., 'vi'), forces language for transcription
+    - deterministic generation settings (do_sample=False, temperature=0.0)
+    - chunk_length_s/stride_length_s: chunking to keep generation focused
+    """
     from transformers import AutoModelForSpeechSeq2Seq, AutoProcessor, pipeline
 
     audio_path = extract_audio(video_path)
@@ -44,18 +62,46 @@ def transcribe_video(video_path: str, model_id: str = "openai/whisper-base", dev
         )
         processor = AutoProcessor.from_pretrained(model_id)
 
+        # Generation settings favoring fidelity and determinism
+        generate_kwargs = {
+            "do_sample": False,
+            "temperature": 0.0,
+            "no_repeat_ngram_size": no_repeat_ngram_size,
+            "max_new_tokens": max_new_tokens,
+        }
+
+        # Build pipeline with explicit generation kwargs and chunking where supported.
         pipe = pipeline(
             "automatic-speech-recognition",
             model=model,
             tokenizer=processor.tokenizer,
             feature_extractor=processor.feature_extractor,
-            max_new_tokens=128,
-            torch_dtype=torch_dtype,
             device=device,
         )
 
-        print("Transcribing video...", file=sys.stderr, flush=True)
-        result = pipe(audio_path, return_timestamps=True)
+        transcribe_call_kwargs = {
+            "return_timestamps": True,
+            # Whisper-style models often support chunking params in the pipeline call
+            "chunk_length_s": chunk_length_s,
+            "stride_length_s": stride_length_s,
+            # reduce hallucination by providing deterministic generation options
+            "generate_kwargs": generate_kwargs,
+        }
+        if language:
+            transcribe_call_kwargs["language"] = language
+        # If translate True, some models will translate into English; default is transcription in source language
+        if translate:
+            transcribe_call_kwargs["task"] = "translate"
+        else:
+            transcribe_call_kwargs["task"] = "transcribe"
+
+        print("Transcribing video (fidelity-first settings)...", file=sys.stderr, flush=True)
+        # Call pipeline; many ASR pipelines accept these kwargs — if not supported, pipeline will ignore extras.
+        result = pipe(audio_path, **transcribe_call_kwargs)
+
+        # Basic post-check: if pipeline returned a single string without timestamps, wrap it
+        if isinstance(result, str):
+            return {"text": result}
 
         return result
     finally:

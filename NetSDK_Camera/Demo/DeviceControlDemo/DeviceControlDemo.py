@@ -13,12 +13,14 @@ from NetSDK.SDK_Enum import EM_DEV_CFG_TYPE, EM_LOGIN_SPAC_CAP_TYPE
 from NetSDK.SDK_Struct import LOG_SET_PRINT_INFO, NET_TIME, C_LDWORD, C_LLONG, NET_IN_LOGIN_WITH_HIGHLEVEL_SECURITY, NET_OUT_LOGIN_WITH_HIGHLEVEL_SECURITY
 from connection_preferences import load_connection
 
-file = "d:/log.log"
+import tempfile
+
+file = os.path.join(tempfile.gettempdir(), "dnc_dahua_sdk.log")
 @WINFUNCTYPE(c_int, c_char_p, c_uint, C_LDWORD)
 def SDKLogCallBack(szLogBuffer, nLogSize, dwUser):
     try:
-        with open(file, 'a') as f:
-            f.write(szLogBuffer.decode())
+        with open(file, 'a', encoding='utf-8', errors='replace') as f:
+            f.write(szLogBuffer.decode('utf-8', 'replace'))
     except Exception as e:
         print(e)
     return 1

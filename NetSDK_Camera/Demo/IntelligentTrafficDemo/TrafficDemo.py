@@ -28,7 +28,9 @@ def AnalyzerDataCallBack(lAnalyzerHandle, dwAlarmType, pAlarmInfo, pBuffer, dwBu
 
 class TrafficWnd(QMainWindow, Ui_MainWindow):
     def __init__(self, parent=None):
+        global wnd
         super(TrafficWnd, self).__init__(parent)
+        wnd = self
         self.setupUi(self)
         # 界面初始化
         self._init_ui()

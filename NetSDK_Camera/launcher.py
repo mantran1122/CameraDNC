@@ -25,6 +25,12 @@ from typing import List, Optional
 if sys.platform == "win32":
     os.environ.setdefault("PYTHONIOENCODING", "utf-8")
 
+# Preload torch on Windows before PyQt5 loads C++ runtime/DLLs to prevent WinError 1114 in c10.dll
+try:
+    import torch
+except Exception:
+    pass
+
 from PyQt5.QtWidgets import QApplication, QMainWindow, QMessageBox
 from PyQt5.QtWebEngineWidgets import QWebEngineView, QWebEngineSettings
 from PyQt5.QtWebChannel import QWebChannel
@@ -91,6 +97,14 @@ DEMOS: List[DemoItem] = [
         "Truy xuất và phát lại video đã được ghi trên thiết bị.",
         "Playback", "#3B82F6",
         ["playback", "xem lại", "video", "record", "replay"],
+    ),
+    DemoItem(
+        "Chuyển âm video thành văn bản",
+        "Demo.VideoToTextDemo.VideoToTextDemo", "VideoToTextDemo", "VideoToTextWindow",
+        "fa-file-audio", "VT",
+        "Chọn video cục bộ, nhận dạng tiếng Việt và xem kết quả theo mốc thời gian.",
+        "AI", "#8B5CF6",
+        ["video", "âm thanh", "audio", "văn bản", "transcribe", "whisper", "pho-whisper"],
     ),
     DemoItem(
         "Điều khiển thiết bị",

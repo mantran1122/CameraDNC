@@ -39,7 +39,9 @@ def search_devie_byIp_callback(pDevNetInfo, pUserData):
 
 class MyMainWindow(QMainWindow, Ui_MainWindow):
     def __init__(self, parent=None):
+        global wnd
         super(MyMainWindow, self).__init__(parent)
+        wnd = self
         self.setupUi(self)
         self.init_ui()
         self.sdk = NetClient()

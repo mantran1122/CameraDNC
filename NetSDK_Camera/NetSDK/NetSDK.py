@@ -12,6 +12,14 @@ netsdkdllpath = netsdkdllpath_dict[system_type]
 configdllpath = configdllpath_dict[system_type]
 
 
+def _to_cllong(val):
+    if hasattr(val, 'value'):
+        return C_LLONG(val.value)
+    if isinstance(val, (int, float)):
+        return C_LLONG(int(val))
+    return C_LLONG(val)
+
+
 error_code = {
     0: '没有错误',
     -1: '未知错误',
@@ -323,7 +331,7 @@ class NetClient(metaclass=Singleton):
             try:
                 error_message = login_error[stuOutParam.nError]
             except KeyError:
-                error_message = 'There is no such error code'
+                error_message = f'Mã lỗi đăng nhập không xác định ({stuOutParam.nError})'
             print(error_message)
         else:
             device_info = stuOutParam.stuDeviceInfo
@@ -405,7 +413,7 @@ class NetClient(metaclass=Singleton):
         :param login_id:登陆ID,LoginWithHighLevelSecurity返回值;user LoginID,LoginWithHighLevelSecurity's returns value
         :return:result:成功：1，失败：0；succeed：1，failed：0
         """
-        login_id = C_LLONG(login_id)
+        login_id = _to_cllong(login_id)
         result = cls.sdk.CLIENT_Logout(login_id)
         if result == 0:
             print(cls.GetLastErrorMessage())
@@ -445,7 +453,7 @@ class NetClient(metaclass=Singleton):
         :return:realplay_id:失败返回0，成功返回大于0的值;failed return 0, successful return the real time monitorID(real time monitor handle),as parameter of related function.
         """
 
-        login_id = C_LLONG(login_id)
+        login_id = _to_cllong(login_id)
         channel = c_int(channel)
         hwnd = c_long(int(hwnd))
         play_type = c_int(play_type)
@@ -462,7 +470,7 @@ class NetClient(metaclass=Singleton):
         :param realplay_id:监视ID,RealPlayEx返回值;monitor handle,RealPlayEx returns value
         :return:result:成功：1，失败：0；succeed：1，failed：0
         """
-        realplay_id = C_LLONG(realplay_id)
+        realplay_id = _to_cllong(realplay_id)
         result = cls.sdk.CLIENT_StopRealPlayEx(realplay_id)
         if result == 0:
             print(cls.GetLastErrorMessage())
@@ -471,7 +479,7 @@ class NetClient(metaclass=Singleton):
     @classmethod
     def OpenSound(cls, realplay_id: int) -> int:
         """Enable decoded audio playback for one live-preview handle."""
-        realplay_id = C_LLONG(realplay_id)
+        realplay_id = _to_cllong(realplay_id)
         result = cls.sdk.CLIENT_OpenSound(realplay_id)
         if result == 0:
             print(cls.GetLastErrorMessage())
@@ -480,7 +488,7 @@ class NetClient(metaclass=Singleton):
     @classmethod
     def CloseSound(cls, realplay_id: int) -> int:
         """Disable decoded audio playback for one live-preview handle."""
-        realplay_id = C_LLONG(realplay_id)
+        realplay_id = _to_cllong(realplay_id)
         result = cls.sdk.CLIENT_CloseSound(realplay_id)
         if result == 0:
             print(cls.GetLastErrorMessage())
@@ -489,7 +497,7 @@ class NetClient(metaclass=Singleton):
     @classmethod
     def SaveRealData(cls, realplay_id: int, file_path: str) -> int:
         """Save the current private live stream, including its audio track, to a temporary DAV file."""
-        realplay_id = C_LLONG(realplay_id)
+        realplay_id = _to_cllong(realplay_id)
         result = cls.sdk.CLIENT_SaveRealData(realplay_id, os.fsencode(file_path))
         if result == 0:
             print(cls.GetLastErrorMessage())
@@ -498,7 +506,7 @@ class NetClient(metaclass=Singleton):
     @classmethod
     def StopSaveRealData(cls, realplay_id: int) -> int:
         """Stop a recording started by SaveRealData."""
-        realplay_id = C_LLONG(realplay_id)
+        realplay_id = _to_cllong(realplay_id)
         result = cls.sdk.CLIENT_StopSaveRealData(realplay_id)
         if result == 0:
             print(cls.GetLastErrorMessage())
@@ -546,7 +554,7 @@ class NetClient(metaclass=Singleton):
         :param lSearchHandle:搜索句柄;search handle
         :return:1:停止搜索成功,0:停止搜索失败;1:stop search device success,0:stop search device failed
         """
-        lSearchHandle = C_LLONG(lSearchHandle)
+        lSearchHandle = _to_cllong(lSearchHandle)
         result = cls.sdk.CLIENT_StopSearchDevices(lSearchHandle)
         if not result:
             print(cls.GetLastErrorMessage())
@@ -582,7 +590,7 @@ class NetClient(metaclass=Singleton):
         :param reserved:保留参数; reserved
         :return:订阅句柄;Handle
         """
-        lLoginID = C_LLONG(lLoginID)
+        lLoginID = _to_cllong(lLoginID)
         nChannelID = c_int(nChannelID)
         dwAlarmType = c_ulong(dwAlarmType)
         bNeedPicFile = c_int(bNeedPicFile)
@@ -602,7 +610,7 @@ class NetClient(metaclass=Singleton):
         :param lAnalyzerHandle:订阅句柄,RealLoadPictureEx接口返回值;handle,the value is returned by RealLoadPictureEx
         :return:1:停止订阅成功,0:停止订阅失败;1:StopLoadPic success,0:StopLoadPic failed
         """
-        lAnalyzerHandle = C_LLONG(lAnalyzerHandle)
+        lAnalyzerHandle = _to_cllong(lAnalyzerHandle)
         result = cls.sdk.CLIENT_StopLoadPic(lAnalyzerHandle)
         if not result:
             print(cls.GetLastErrorMessage())
@@ -619,7 +627,7 @@ class NetClient(metaclass=Singleton):
         """
         if login_id == 0:
             return
-        login_id = C_LLONG(login_id)
+        login_id = _to_cllong(login_id)
         emType = c_int(emType)
         p_value = pointer(value)
         result = cls.sdk.CLIENT_SetDeviceMode(login_id, emType, p_value)
@@ -647,7 +655,7 @@ class NetClient(metaclass=Singleton):
         """
         if login_id == 0:
             return
-        login_id = C_LLONG(login_id)
+        login_id = _to_cllong(login_id)
         channel_id = c_int(channel_id)
         recordfile_type = c_int(recordfile_type)
         recordfile_infos = NET_RECORDFILE_INFO * 5000
@@ -682,7 +690,7 @@ class NetClient(metaclass=Singleton):
         """
         if login_id == 0:
             return 0
-        login_id = C_LLONG(login_id)
+        login_id = _to_cllong(login_id)
         channel_id = c_int(channel_id)
         hwnd = C_LONG(hwnd)
         cls.sdk.CLIENT_PlayBackByTimeEx.restype = C_LLONG
@@ -705,7 +713,7 @@ class NetClient(metaclass=Singleton):
         """
         if login_id == 0:
             return 0
-        login_id = C_LLONG(login_id)
+        login_id = _to_cllong(login_id)
         channel_id = c_int(channel_id)
         in_param = byref(in_param)
         out_param = byref(out_param)
@@ -724,7 +732,7 @@ class NetClient(metaclass=Singleton):
         """
         if playback_id == 0:
             return
-        playback_id = C_LLONG(playback_id)
+        playback_id = _to_cllong(playback_id)
         result = cls.sdk.CLIENT_StopPlayBack(playback_id)
         if not result:
             print(cls.GetLastErrorMessage())
@@ -740,7 +748,7 @@ class NetClient(metaclass=Singleton):
         """
         if playback_id == 0:
             return 0
-        playback_id = C_LLONG(playback_id)
+        playback_id = _to_cllong(playback_id)
         is_pause = c_int(is_pause)
         result = cls.sdk.CLIENT_PausePlayBack(playback_id, is_pause)
         if not result:
@@ -768,7 +776,7 @@ class NetClient(metaclass=Singleton):
         """
         if login_id == 0:
             return
-        login_id = C_LLONG(login_id)
+        login_id = _to_cllong(login_id)
         channel_id = c_int(channel_id)
         save_filename = c_char_p(save_filename.encode('gbk'))
         pReserved = pointer(c_int(pReserved))
@@ -790,7 +798,7 @@ class NetClient(metaclass=Singleton):
         """
         if download_id == 0:
             return
-        download_id = C_LLONG(download_id)
+        download_id = _to_cllong(download_id)
         result = cls.sdk.CLIENT_StopDownload(download_id)
         if not result:
             print(cls.GetLastErrorMessage())
@@ -812,7 +820,7 @@ class NetClient(metaclass=Singleton):
         """
         if login_id == 0:
             return
-        login_id = C_LLONG(login_id)
+        login_id = _to_cllong(login_id)
         channel_id = C_LONG(channel_id)
         out_buffer = pointer(out_buffer)
         outbuffer_size = C_DWORD(outbuffer_size)
@@ -841,7 +849,7 @@ class NetClient(metaclass=Singleton):
         """
         if login_id == 0:
             return
-        login_id = C_LLONG(login_id)
+        login_id = _to_cllong(login_id)
         channel_id = C_LONG(channel_id)
         in_buffer = pointer(in_buffer)
         inbuffer_size = C_DWORD(inbuffer_size)
@@ -859,7 +867,7 @@ class NetClient(metaclass=Singleton):
         """
         if login_id == 0:
             return
-        login_id = C_LLONG(login_id)
+        login_id = _to_cllong(login_id)
         result = cls.sdk.CLIENT_RebootDev(login_id)
         if not result:
             print(cls.GetLastErrorMessage())
@@ -885,7 +893,7 @@ class NetClient(metaclass=Singleton):
         :param reserved:保留字段；reserved
         :return:空；None
         """
-        lLoginID = C_LLONG(lLoginID)
+        lLoginID = _to_cllong(lLoginID)
         par = pointer(par)
         reserved = pointer(c_int(reserved))
         result = cls.sdk.CLIENT_SnapPictureEx(lLoginID, par, reserved)
@@ -900,9 +908,9 @@ class NetClient(metaclass=Singleton):
         """
         向设备订阅报警--扩展;subscribe alarm---extensive
         :param lLoginID:登陆句柄,LoginWithHighLevelSecurity返回值;user LoginID,LoginWithHighLevelSecurity's returns value
-        :return:1:成功，0：失败；1：success,0:failed
+        :param return:1:成功，0：失败；1：success,0:failed
         """
-        lLoginID = C_LLONG(lLoginID)
+        lLoginID = _to_cllong(lLoginID)
         result = cls.sdk.CLIENT_StartListenEx(lLoginID)
         if not result:
             print(cls.GetLastErrorMessage())
@@ -924,9 +932,9 @@ class NetClient(metaclass=Singleton):
         """
         停止订阅报警;Stop subscribe alarm
         :param lLoginID: 登陆句柄,LoginWithHighLevelSecurity返回值;user LoginID,LoginWithHighLevelSecurity's returns value
-        :return:1:成功，0：失败；1：success,0:failed
+        :param return:1:成功，0：失败；1：success,0:failed
         """
-        lLoginID = C_LLONG(lLoginID)
+        lLoginID = _to_cllong(lLoginID)
         result = cls.sdk.CLIENT_StopListen(lLoginID)
         if not result:
             print(cls.GetLastErrorMessage())
@@ -938,9 +946,9 @@ class NetClient(metaclass=Singleton):
         显示私有数据，例如规则框，规则框报警，移动侦测等;Stop subscribe alarm
         :param realplay_id:监视ID,RealPlayEx返回值;monitor handle,RealPlayEx returns value
         :param lLoginID: 播放句柄,LoginWithHighLevelSecurity返回值;user LoginID,LoginWithHighLevelSecurity's returns value
-        :return:1:成功，0：失败；1：success,0:failed
+        :param return:1:成功，0：失败；1：success,0:failed
         """
-        realplay_id = C_LLONG(realplay_id)
+        realplay_id = _to_cllong(realplay_id)
         bTrue = c_int(bTrue)
         result = cls.sdk.CLIENT_RenderPrivateData(realplay_id, bTrue)
         if not result:
