@@ -293,7 +293,7 @@ async function openClipModal(eventId, clipFilename, description) {
     const videoElem = document.getElementById('modal-video-player');
     const sourceElem = document.getElementById('modal-video-source');
     
-    const clipUrl = /clips/;
+    const clipUrl = `/clips/${encodeURIComponent(clipFilename)}`;
     if (sourceElem) {
         sourceElem.src = clipUrl;
     }
@@ -302,13 +302,13 @@ async function openClipModal(eventId, clipFilename, description) {
     videoElem.play().catch(e => console.log('Autoplay prevented:', e));
 
     try {
-        const res = await fetch(/api/events/);
+        const res = await fetch(`/api/events/${eventId}`);
         const ev = await res.json();
         
-        document.getElementById('clip-detail-ch').innerText = Ch ;
+        document.getElementById('clip-detail-ch').innerText = `Ch ${String(ev.channel).padStart(2, '0')}`;
         document.getElementById('clip-detail-time').innerText = ev.timestamp;
-        document.getElementById('clip-detail-type').innerText = ${ev.event_code} ();
-        document.getElementById('clip-detail-audio').innerText = ev.audio_level_db ? ${ev.audio_level_db} dB : 'N/A';
+        document.getElementById('clip-detail-type').innerText = `${ev.event_code} (${ev.event_type})`;
+        document.getElementById('clip-detail-audio').innerText = ev.audio_level_db ? `${ev.audio_level_db} dB` : 'N/A';
     } catch(e) {}
 
     document.getElementById('videoModal').classList.add('active');
