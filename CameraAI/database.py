@@ -9,6 +9,7 @@ DB_PATH = STORAGE_DIR / "camera_metadata.db"
 def get_db_connection():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
     return conn
 
 def init_db():
@@ -43,6 +44,27 @@ def init_db():
         total_vehicle_count INTEGER DEFAULT 0,
         peak_hour INTEGER DEFAULT 12,
         summary_text TEXT
+    );
+    """)
+
+    # Derived audio results are kept separate from immutable NVR event metadata.
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS audio_analyses (
+        event_id INTEGER PRIMARY KEY,
+        status TEXT NOT NULL,
+        wav_path TEXT,
+        transcript TEXT,
+        segments_json TEXT,
+        speech_detected INTEGER,
+        audio_rms REAL,
+        active_speech_seconds REAL,
+        ignored_reason TEXT,
+        audio_model TEXT,
+        suggestion_json TEXT,
+        error_message TEXT,
+        created_at TEXT NOT NULL,
+        analyzed_at TEXT,
+        FOREIGN KEY(event_id) REFERENCES events(id)
     );
     """)
     
@@ -142,6 +164,79 @@ def update_event_clip(event_id: int, clip_filename: str):
     cursor.execute("UPDATE events SET clip_filename = ? WHERE id = ?", (clip_filename, event_id))
     conn.commit()
     conn.close()
+
+
+def create_audio_analysis(event_id: int) -> bool:
+    """Create the single pending audio-analysis record for an event.
+
+    Repeated calls are safe: an existing result is never overwritten.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        INSERT OR IGNORE INTO audio_analyses (event_id, status, created_at)
+        VALUES (?, 'pending', ?)
+        """,
+        (event_id, datetime.now().astimezone().isoformat(timespec="seconds")),
+    )
+    created = cursor.rowcount == 1
+    conn.commit()
+    conn.close()
+    return created
+
+
+def update_audio_analysis(event_id: int, **values: Any) -> bool:
+    """Update permitted derived-audio fields for an existing event analysis."""
+    if "segments" in values:
+        values["segments_json"] = json.dumps(values.pop("segments"), ensure_ascii=False)
+    if "suggestion" in values:
+        values["suggestion_json"] = json.dumps(values.pop("suggestion"), ensure_ascii=False)
+
+    allowed_fields = {
+        "status", "wav_path", "transcript", "segments_json", "speech_detected",
+        "audio_rms", "active_speech_seconds", "ignored_reason", "audio_model",
+        "suggestion_json", "error_message", "analyzed_at",
+    }
+    unexpected_fields = set(values) - allowed_fields
+    if unexpected_fields:
+        raise ValueError(f"Unsupported audio analysis fields: {sorted(unexpected_fields)}")
+    if not values:
+        return False
+
+    assignments = ", ".join(f"{field} = ?" for field in values)
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        f"UPDATE audio_analyses SET {assignments} WHERE event_id = ?",
+        [*values.values(), event_id],
+    )
+    updated = cursor.rowcount == 1
+    conn.commit()
+    conn.close()
+    return updated
+
+
+def get_audio_analysis(event_id: int) -> Optional[Dict[str, Any]]:
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM audio_analyses WHERE event_id = ?", (event_id,))
+    row = cursor.fetchone()
+    conn.close()
+    if not row:
+        return None
+
+    item = dict(row)
+    for database_key, api_key in (("segments_json", "segments"), ("suggestion_json", "suggestion")):
+        raw_value = item.pop(database_key)
+        if raw_value is None:
+            item[api_key] = None
+            continue
+        try:
+            item[api_key] = json.loads(raw_value)
+        except json.JSONDecodeError:
+            item[api_key] = None
+    return item
 
 # Initialize DB on module import
 init_db()

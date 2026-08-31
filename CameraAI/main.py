@@ -138,6 +138,7 @@ async def get_event_detail(event_id: int):
     ev = database.get_event_by_id(event_id)
     if not ev:
         return JSONResponse(status_code=404, content={"error": "Event not found"})
+    ev["audio_analysis"] = database.get_audio_analysis(event_id)
     return ev
 
 @app.get("/api/summary/daily")
