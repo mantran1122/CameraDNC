@@ -20,7 +20,7 @@ DEFAULT_CONFIG = {
     "nvr_user": "admin",
     "nvr_password": "admin123",
     "active_channels": list(range(1, 33)),  # 1 to 32
-    "demo_mode": True,
+    "demo_mode": False,
     "pre_buffer_sec": 5,
     "post_buffer_sec": 5
 }
@@ -51,7 +51,7 @@ RTSP_PORT = _current_cfg.get("rtsp_port", 554)
 NVR_USER = _current_cfg.get("nvr_user", "admin")
 NVR_PASSWORD = _current_cfg.get("nvr_password", "admin123")
 ACTIVE_CHANNELS = _current_cfg.get("active_channels", list(range(1, 33)))
-DEMO_MODE = _current_cfg.get("demo_mode", True)
+DEMO_MODE = _current_cfg.get("demo_mode", False)
 PRE_BUFFER_SEC = _current_cfg.get("pre_buffer_sec", 5)
 POST_BUFFER_SEC = _current_cfg.get("post_buffer_sec", 5)
 CLIP_DURATION_SEC = PRE_BUFFER_SEC + POST_BUFFER_SEC
