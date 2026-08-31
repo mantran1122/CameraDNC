@@ -1,6 +1,7 @@
 """Background processing for audio attached to an NVR anomaly event."""
 
 import hashlib
+import json
 import os
 import queue
 import subprocess
@@ -87,7 +88,18 @@ class AudioAnalysisWorker:
             clip_path = Path(config.CLIPS_DIR) / clip_filename
             self._set_status(event_id, "extracting_audio")
             if not self._has_audio_stream(clip_path):
-                self._set_status(event_id, "no_audio", ignored_reason="no_audio_track")
+                transcription = {"transcript": "", "speech_detected": 0, "ignored_reason": "no_audio_track"}
+                self._set_status(event_id, "no_audio", **transcription)
+                # No audio track is a valid result.  It may still receive a
+                # metadata-only suggestion, with evidence explicitly labelled.
+                suggestion, suggestion_error = self._create_suggestion(event, transcription)
+                self._set_status(
+                    event_id,
+                    "no_audio",
+                    suggestion=suggestion,
+                    error_message=suggestion_error,
+                    analyzed_at=datetime.now().astimezone().isoformat(timespec="seconds"),
+                )
                 return
 
             wav_path = self._extract_wav(clip_path)
@@ -154,17 +166,95 @@ class AudioAnalysisWorker:
         if result.get("status") != "ok":
             self._set_status(event_id, "failed", error_message=result.get("detail", "Cosmos transcription failed"))
             return
+        transcription = {
+            "transcript": result.get("text", ""),
+            "speech_detected": int(bool(result.get("speech_detected"))),
+            "audio_rms": result.get("audio_rms"),
+            "active_speech_seconds": result.get("active_speech_seconds"),
+            "ignored_reason": result.get("ignored_reason"),
+            "audio_model": result.get("audio_model"),
+        }
+        self._set_status(event_id, "generating_suggestion", **transcription)
+        suggestion, suggestion_error = self._create_suggestion(event, transcription)
         self._set_status(
             event_id,
             "completed",
-            transcript=result.get("text", ""),
-            speech_detected=int(bool(result.get("speech_detected"))),
-            audio_rms=result.get("audio_rms"),
-            active_speech_seconds=result.get("active_speech_seconds"),
-            ignored_reason=result.get("ignored_reason"),
-            audio_model=result.get("audio_model"),
+            suggestion=suggestion,
+            # A suggestion outage must not discard a valid transcription or mark
+            # the audio analysis itself as failed.
+            error_message=suggestion_error,
             analyzed_at=datetime.now().astimezone().isoformat(timespec="seconds"),
         )
+
+    def _create_suggestion(self, event: dict, transcription: dict) -> tuple[Optional[dict], Optional[str]]:
+        """Create a strictly evidence-grounded suggestion after transcription.
+
+        The endpoint follows the OpenAI Chat Completions shape.  Keeping it
+        optional lets the audio pipeline remain usable when an LLM is offline.
+        """
+        if not config.AUDIO_SUGGESTION_API_URL:
+            return None, "Chưa cấu hình dịch vụ gợi ý LLM."
+
+        evidence = {
+            "nvr_metadata": event.get("metadata", {}),
+            "event_code": event.get("event_code"),
+            "event_description": event.get("description"),
+            "audio_transcript": transcription.get("transcript") or "",
+            "speech_detected": bool(transcription.get("speech_detected")),
+            "ignored_reason": transcription.get("ignored_reason"),
+        }
+        prompt = (
+            "Bạn là trợ lý vận hành camera. Chỉ dùng evidence bên dưới; không suy đoán "
+            "hành vi như cãi vã, đập phá hoặc đánh nhau chỉ từ dB. Trả về đúng JSON: "
+            '{"summary": string, "risk_level": "none|low|medium|high", '
+            '"recommended_action": string, "evidence": [{"source": "NVR metadata|audio transcript|không có audio", "detail": string}]}. '
+            "Nếu transcript rỗng, chỉ mô tả metadata NVR và dùng evidence nguồn 'không có audio' hoặc 'NVR metadata'.\n"
+            f"Evidence: {json.dumps(evidence, ensure_ascii=False)}"
+        )
+        headers = {"Content-Type": "application/json"}
+        if config.AUDIO_SUGGESTION_API_KEY:
+            headers["Authorization"] = f"Bearer {config.AUDIO_SUGGESTION_API_KEY}"
+        payload = {
+            "model": config.AUDIO_SUGGESTION_MODEL or "audio-event-summarizer",
+            "messages": [
+                {"role": "system", "content": "Return valid JSON only."},
+                {"role": "user", "content": prompt},
+            ],
+            "temperature": 0,
+            "response_format": {"type": "json_object"},
+        }
+        try:
+            response = requests.post(config.AUDIO_SUGGESTION_API_URL, json=payload, headers=headers, timeout=30)
+            response.raise_for_status()
+            body = response.json()
+            raw = body.get("choices", [{}])[0].get("message", {}).get("content", body)
+            suggestion = json.loads(raw) if isinstance(raw, str) else raw
+            return self._validate_suggestion(suggestion), None
+        except (requests.RequestException, ValueError, TypeError, KeyError, IndexError) as exc:
+            return None, f"Không thể tạo gợi ý LLM: {exc}"
+
+    @staticmethod
+    def _validate_suggestion(value: object) -> dict:
+        if not isinstance(value, dict):
+            raise ValueError("LLM trả về JSON không phải object")
+        required = ("summary", "risk_level", "recommended_action", "evidence")
+        if any(not isinstance(value.get(field), str) for field in required[:3]) or not isinstance(value.get("evidence"), list):
+            raise ValueError("LLM trả về thiếu trường gợi ý bắt buộc")
+        risk_level = value["risk_level"].lower()
+        if risk_level not in {"none", "low", "medium", "high"}:
+            raise ValueError("risk_level không hợp lệ")
+        allowed_sources = {"NVR metadata", "audio transcript", "không có audio"}
+        clean_evidence = []
+        for item in value["evidence"]:
+            if not isinstance(item, dict) or item.get("source") not in allowed_sources or not isinstance(item.get("detail"), str):
+                raise ValueError("evidence không hợp lệ")
+            clean_evidence.append({"source": item["source"], "detail": item["detail"]})
+        return {
+            "summary": value["summary"],
+            "risk_level": risk_level,
+            "recommended_action": value["recommended_action"],
+            "evidence": clean_evidence,
+        }
 
     def _notify(self, event_id: int) -> None:
         if self._on_updated:

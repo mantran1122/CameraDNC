@@ -56,6 +56,11 @@ PRE_BUFFER_SEC = _current_cfg.get("pre_buffer_sec", 5)
 POST_BUFFER_SEC = _current_cfg.get("post_buffer_sec", 5)
 CLIP_DURATION_SEC = PRE_BUFFER_SEC + POST_BUFFER_SEC
 COSMOS_AUDIO_URL = os.getenv("COSMOS_AUDIO_URL", "http://127.0.0.1:8765/transcribe")
+# Optional OpenAI-compatible endpoint used only to turn completed audio evidence
+# into an operator-facing suggestion.  Audio transcription does not depend on it.
+AUDIO_SUGGESTION_API_URL = os.getenv("AUDIO_SUGGESTION_API_URL", "").strip()
+AUDIO_SUGGESTION_API_KEY = os.getenv("AUDIO_SUGGESTION_API_KEY", "").strip()
+AUDIO_SUGGESTION_MODEL = os.getenv("AUDIO_SUGGESTION_MODEL", "").strip()
 
 def get_ffmpeg_executable():
     import shutil

@@ -150,6 +150,8 @@ async def get_events_api(
         limit=limit,
         only_anomalies=only_anomalies
     )
+    for event in events:
+        event["audio_analysis"] = database.get_audio_analysis(event["id"])
     return {"events": events, "count": len(events)}
 
 @app.get("/api/events/{event_id}")

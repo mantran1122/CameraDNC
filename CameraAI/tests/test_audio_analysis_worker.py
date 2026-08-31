@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from datetime import datetime
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import audio_analysis_worker  # noqa: E402
@@ -46,3 +46,30 @@ class AudioAnalysisWorkerTest(unittest.TestCase):
         self.assertEqual(analysis["ignored_reason"], "no_audio_track")
         self.assertEqual(event["clip_filename"], "event.mp4")
 
+    def test_suggestion_is_grounded_and_validated(self):
+        worker = audio_analysis_worker.AudioAnalysisWorker()
+        old_url = config.AUDIO_SUGGESTION_API_URL
+        old_key = config.AUDIO_SUGGESTION_API_KEY
+        old_model = config.AUDIO_SUGGESTION_MODEL
+        config.AUDIO_SUGGESTION_API_URL = "http://llm.test/v1/chat/completions"
+        config.AUDIO_SUGGESTION_API_KEY = "test-key"
+        config.AUDIO_SUGGESTION_MODEL = "test-model"
+        response = Mock()
+        response.json.return_value = {
+            "choices": [{"message": {"content": '{"summary":"Có tiếng nói ngắn.","risk_level":"low","recommended_action":"Kiểm tra clip.","evidence":[{"source":"audio transcript","detail":"Xin chào"}]}'}}]
+        }
+        try:
+            with patch.object(audio_analysis_worker.requests, "post", return_value=response) as post:
+                suggestion, error = worker._create_suggestion(
+                    {"event_code": "SoundDetection", "description": "Sound", "metadata": {"Code": "SoundDetection"}},
+                    {"transcript": "Xin chào", "speech_detected": 1, "ignored_reason": None},
+                )
+        finally:
+            config.AUDIO_SUGGESTION_API_URL = old_url
+            config.AUDIO_SUGGESTION_API_KEY = old_key
+            config.AUDIO_SUGGESTION_MODEL = old_model
+
+        self.assertIsNone(error)
+        self.assertEqual(suggestion["risk_level"], "low")
+        self.assertEqual(suggestion["evidence"][0]["source"], "audio transcript")
+        self.assertEqual(post.call_args.kwargs["headers"]["Authorization"], "Bearer test-key")

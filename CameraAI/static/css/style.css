@@ -499,6 +499,22 @@ body {
     gap: 0.75rem;
 }
 
+.audio-analysis-panel {
+    margin-top: 1rem;
+    background: rgba(99, 102, 241, 0.08);
+    border: 1px solid rgba(99, 102, 241, 0.25);
+    border-radius: 10px;
+    padding: 1rem;
+    font-size: 0.875rem;
+}
+.audio-analysis-title { font-weight: 700; margin-bottom: 0.65rem; }
+.audio-status { display: inline-block; border-radius: 999px; padding: 0.2rem 0.55rem; margin-bottom: 0.8rem; background: rgba(6, 182, 212, 0.15); color: #a5f3fc; font-size: 0.75rem; font-weight: 700; }
+.audio-analysis-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }
+.audio-analysis-grid p { margin-top: 0.25rem; color: #dbeafe; white-space: pre-wrap; }
+.audio-evidence { margin: 0.4rem 0 0 1.1rem; color: var(--text-muted); }
+.audio-analysis-error { margin-top: 0.75rem; color: #fca5a5; }
+@media (max-width: 640px) { .audio-analysis-grid, .clip-hud-info { grid-template-columns: 1fr; } }
+
 /* Tabs styling */
 .tabs-container {
     display: flex;

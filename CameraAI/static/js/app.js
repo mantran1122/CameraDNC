@@ -133,6 +133,7 @@ async function fetchEvents(onlyAnomalies = false) {
 function createEventCard(ev) {
     const card = document.createElement('div');
     card.className = `event-item ${ev.event_type}`;
+    card.dataset.eventId = ev.id;
 
     let badgeClass = 'badge-info';
     let badgeLabel = ev.event_code;
@@ -145,6 +146,7 @@ function createEventCard(ev) {
     }
 
     const hasClip = Boolean(ev.clip_filename);
+    const audioStatus = formatAudioStatus(ev.audio_analysis);
 
     card.innerHTML = `
         <div class="event-top">
@@ -154,12 +156,59 @@ function createEventCard(ev) {
         <div class="event-desc">${ev.description}</div>
         <div class="event-bottom">
             <span>Camera Ch ${String(ev.channel).padStart(2, '0')} ${ev.audio_level_db ? `| 🔊 ${ev.audio_level_db} dB` : ''}</span>
+            ${audioStatus ? `<span class="audio-status">${audioStatus}</span>` : ''}
             ${hasClip ? `<button class="btn-clip-play" onclick="openClipModal(${ev.id}, '${ev.clip_filename}', '${ev.description}')">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg> Xem 10s Clip
             </button>` : ''}
         </div>
     `;
     return card;
+}
+
+function formatAudioStatus(analysis) {
+    if (!analysis) return '';
+    const labels = {
+        pending: 'Đang chờ clip',
+        waiting_for_post_buffer: 'Đang chờ clip',
+        downloading_clip: 'Đang tải clip',
+        extracting_audio: 'Đang tách âm thanh',
+        transcribing: 'Đang phân tích âm thanh',
+        generating_suggestion: 'Đang tạo gợi ý',
+        completed: 'Đã phân tích',
+        no_audio: 'Không có audio',
+        failed: 'Lỗi phân tích',
+    };
+    return labels[analysis.status] || analysis.status;
+}
+
+function setText(id, value, fallback = '-') {
+    const element = document.getElementById(id);
+    if (element) element.textContent = value || fallback;
+}
+
+function renderAudioAnalysis(analysis) {
+    const status = formatAudioStatus(analysis);
+    setText('clip-audio-status', status, 'Chưa có dữ liệu');
+    setText('clip-audio-transcript', analysis?.transcript, analysis?.status === 'no_audio' ? 'Clip không có audio track.' : 'Chưa có transcript.');
+    const suggestion = analysis?.suggestion;
+    setText('clip-audio-summary', suggestion?.summary, 'Chưa có gợi ý.');
+    setText('clip-audio-risk', suggestion?.risk_level, '-');
+    setText('clip-audio-action', suggestion?.recommended_action, 'Chưa có hành động đề xuất.');
+    setText('clip-audio-error', analysis?.error_message, '');
+
+    const list = document.getElementById('clip-audio-evidence');
+    if (!list) return;
+    list.replaceChildren();
+    (suggestion?.evidence || []).forEach(item => {
+        const row = document.createElement('li');
+        row.textContent = `${item.source}: ${item.detail}`;
+        list.appendChild(row);
+    });
+    if (!list.children.length) {
+        const row = document.createElement('li');
+        row.textContent = 'Chưa có evidence suy luận.';
+        list.appendChild(row);
+    }
 }
 
 // Render Chart.js Timeline
@@ -309,6 +358,7 @@ async function openClipModal(eventId, clipFilename, description) {
         document.getElementById('clip-detail-time').innerText = ev.timestamp;
         document.getElementById('clip-detail-type').innerText = `${ev.event_code} (${ev.event_type})`;
         document.getElementById('clip-detail-audio').innerText = ev.audio_level_db ? `${ev.audio_level_db} dB` : 'N/A';
+        renderAudioAnalysis(ev.audio_analysis);
     } catch(e) {}
 
     document.getElementById('videoModal').classList.add('active');
@@ -341,6 +391,8 @@ function initWebSocket() {
         console.log('Realtime event received:', ev);
 
         const container = document.getElementById('events-container');
+        const previous = container.querySelector(`[data-event-id="${ev.id}"]`);
+        if (previous) previous.remove();
         container.insertBefore(createEventCard(ev), container.firstChild);
 
         fetchDailySummary();

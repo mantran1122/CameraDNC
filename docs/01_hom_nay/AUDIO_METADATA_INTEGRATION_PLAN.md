@@ -149,22 +149,22 @@ X-Cosmos-Audio-Sha256: <sha256 WAV>
 
 **Xong khi:** clip tiếng Việt mẫu trả transcript và dữ liệu được lưu theo event tương ứng.
 
-### Bước 5 — Tạo gợi ý ngôn ngữ tự nhiên
+### Bước 5 — Tạo gợi ý ngôn ngữ tự nhiên *(đã xong về code)*
 
-- [ ] Chỉ gọi LLM sau khi transcription hoàn thành.
-- [ ] Prompt nhận metadata gốc + kết quả audio; yêu cầu JSON có `summary`, `risk_level`, `recommended_action`, `evidence`.
-- [ ] `evidence` phải nêu rõ nguồn: `NVR metadata`, `audio transcript`, hoặc `không có audio`.
-- [ ] Nếu transcript trống: gợi ý chỉ được nói về metadata do NVR báo, không bịa nội dung lời nói.
-- [ ] Lưu JSON vào `suggestion_json`.
+- [x] Chỉ gọi LLM sau khi transcription hoàn thành.
+- [x] Prompt nhận metadata gốc + kết quả audio; yêu cầu JSON có `summary`, `risk_level`, `recommended_action`, `evidence`.
+- [x] `evidence` phải nêu rõ nguồn: `NVR metadata`, `audio transcript`, hoặc `không có audio`.
+- [x] Nếu transcript trống: gợi ý chỉ được nói về metadata do NVR báo, không bịa nội dung lời nói.
+- [x] Lưu JSON vào `suggestion_json`.
 
 **Xong khi:** event `SoundDetection` có gợi ý tiếng Việt, truy ngược được về metadata và transcript.
 
-### Bước 6 — Hiển thị Dashboard
+### Bước 6 — Hiển thị Dashboard *(đã xong về code)*
 
-- [ ] Event card hiện một trong các trạng thái: `Đang chờ clip`, `Đang phân tích âm thanh`, `Đã phân tích`, `Không có audio`, `Lỗi`.
-- [ ] Modal clip hiển thị metadata gốc, mức dB, transcript, gợi ý và lỗi (nếu có).
-- [ ] Khi worker cập nhật, broadcast WebSocket event mới để Dashboard refresh đúng card.
-- [ ] KPI/audio summary chỉ đếm metadata NVR; transcript chỉ bổ sung context, không làm tăng số event.
+- [x] Event card hiện một trong các trạng thái: `Đang chờ clip`, `Đang phân tích âm thanh`, `Đã phân tích`, `Không có audio`, `Lỗi`.
+- [x] Modal clip hiển thị metadata gốc, mức dB, transcript, gợi ý và lỗi (nếu có).
+- [x] Khi worker cập nhật, broadcast WebSocket event mới để Dashboard refresh đúng card.
+- [x] KPI/audio summary chỉ đếm metadata NVR; transcript chỉ bổ sung context, không làm tăng số event.
 
 **Xong khi:** người dùng bấm một event và thấy đầy đủ clip 10 giây + kết quả audio theo cùng `event_id`.
 
@@ -193,4 +193,3 @@ X-Cosmos-Audio-Sha256: <sha256 WAV>
 - Audio thật được Cosmos transcribe và lưu bền theo `event_id`.
 - Dashboard hiện transcript/gợi ý, metadata gốc và evidence phân biệt rõ.
 - Khi Cosmos/NVR lỗi, Dashboard vẫn hoạt động và listener không bị chặn.
-
