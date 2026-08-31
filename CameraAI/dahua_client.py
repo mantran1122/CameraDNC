@@ -63,13 +63,19 @@ class DahuaNVRListener(threading.Thread):
                     self.process_event_block(header_block)
 
     def process_event_block(self, block_str: str):
-        lines = block_str.strip().splitlines()
         event_data = {}
-        
-        for line in lines:
-            if "=" in line:
-                key, val = line.split("=", 1)
-                event_data[key.strip()] = val.strip()
+
+        # Dahua eventManager commonly sends a single record such as
+        # ``Code=VideoMotion;action=Start;index=0``.  Some firmware versions
+        # send one key per line instead.  Accept both forms.
+        for line in block_str.strip().splitlines():
+            for field in line.split(";"):
+                if "=" not in field:
+                    continue
+                key, val = field.split("=", 1)
+                key = key.strip()
+                if key:
+                    event_data[key] = val.strip()
                 
         code = event_data.get("Code")
         action = event_data.get("action")
@@ -134,5 +140,6 @@ class DahuaNVRListener(threading.Thread):
                 self.audio_job_callback(event_id)
         
         event_obj = database.get_event_by_id(event_id)
+        print(f"[DahuaClient] Stored event id={event_id} code={code} channel={channel}")
         if event_obj and self.broadcast_callback:
             self.broadcast_callback(event_obj)
