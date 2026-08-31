@@ -4,6 +4,8 @@
 !.env.example
 !*.example.env
 **/config.json
+CameraAI/storage/nvr_config.json
+.omo/
 *.pem
 *.key
 id_rsa*

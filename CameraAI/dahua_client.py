@@ -1,0 +1,133 @@
+import time
+import json
+import re
+import threading
+from datetime import datetime
+import requests
+from requests.auth import HTTPDigestAuth
+
+import config
+import database
+import video_clipper
+
+class DahuaNVRListener(threading.Thread):
+    def __init__(self, broadcast_callback=None):
+        super().__init__(daemon=True)
+        self.broadcast_callback = broadcast_callback
+        self.is_running = False
+        
+    def stop(self):
+        self.is_running = False
+
+    def run(self):
+        if config.DEMO_MODE:
+            print("[DahuaClient] DEMO_MODE enabled. Listener standing by.")
+            return
+
+        self.is_running = True
+        protocol = "https" if config.USE_HTTPS else "http"
+        url = (
+            f"{protocol}://{config.NVR_HOST}:{config.NVR_PORT}/cgi-bin/eventManager.cgi"
+            f"?action=attach&codes=[{','.join(config.EVENT_CODES)}]"
+        )
+        print(f"[DahuaClient] Connecting to Dahua NVR event stream over Internet/WAN: {url}")
+        
+        auth = HTTPDigestAuth(config.NVR_USER, config.NVR_PASSWORD)
+        
+        while self.is_running:
+            try:
+                response = requests.get(url, auth=auth, stream=True, timeout=60, verify=False)
+                if response.status_code == 200:
+                    print(f"[DahuaClient] Connected successfully to Dahua NVR ({config.NVR_HOST}).")
+                    self.parse_multipart_stream(response)
+                else:
+                    print(f"[DahuaClient] HTTP Error {response.status_code} from NVR ({config.NVR_HOST}). Retrying in 10s...")
+                    time.sleep(10)
+            except Exception as e:
+                print(f"[DahuaClient] Connection error to {config.NVR_HOST}: {e}. Retrying in 10s...")
+                time.sleep(10)
+
+    def parse_multipart_stream(self, response):
+        buffer = ""
+        for chunk in response.iter_content(chunk_size=1024):
+            if not self.is_running:
+                break
+            if chunk:
+                buffer += chunk.decode('utf-8', errors='ignore')
+                while "\r\n\r\n" in buffer or "\n\n" in buffer:
+                    parts = re.split(r'\r\n\r\n|\n\n', buffer, 1)
+                    header_block = parts[0]
+                    buffer = parts[1] if len(parts) > 1 else ""
+                    
+                    self.process_event_block(header_block)
+
+    def process_event_block(self, block_str: str):
+        lines = block_str.strip().splitlines()
+        event_data = {}
+        
+        for line in lines:
+            if "=" in line:
+                key, val = line.split("=", 1)
+                event_data[key.strip()] = val.strip()
+                
+        code = event_data.get("Code")
+        action = event_data.get("action")
+        index = event_data.get("index", "0")
+        
+        if not code or action != "Start":
+            return
+            
+        channel = int(index) + 1 if index.isdigit() else 1
+        
+        # Check active channels filter
+        if config.ACTIVE_CHANNELS and channel not in config.ACTIVE_CHANNELS:
+            return
+
+        now = datetime.now()
+        timestamp_str = now.strftime("%Y-%m-%d %H:%M:%S")
+        
+        event_type = "normal_metadata"
+        severity = "info"
+        description = f"Phát hiện sự kiện {code} tại Camera Ch {channel:02d}"
+        audio_db = None
+        
+        if code in ["AudioAnomaly", "SoundDetection", "FightSound"]:
+            event_type = "audio_anomaly"
+            severity = "high"
+            audio_db = float(event_data.get("AudioValue", 85.0))
+            description = f"BẤT THƯỜNG ÂM THANH: Phát hiện tiếng la gào/tiếng động lớn ({audio_db} dB) tại Cam {channel:02d}"
+        elif code in ["Intrusion", "CrossLine", "Fight"]:
+            event_type = "video_anomaly"
+            severity = "high"
+            description = f"BẤT THƯỜNG VIDEO: Vi phạm vùng an ninh / Đột nhập ({code}) tại Cam {channel:02d}"
+        elif code in ["FaceDetection", "HumanTrait"]:
+            description = f"Metadata Người: Phát hiện đối tượng tại Cam {channel:02d}"
+        elif code in ["VehicleTrait"]:
+            description = f"Metadata Phương tiện: Phát hiện xe tại Cam {channel:02d}"
+
+        clip_name = None
+        if event_type in ["audio_anomaly", "video_anomaly"]:
+            clip_filename = f"clip_ch{channel}_{now.strftime('%Y%m%d_%H%M%S')}.mp4"
+            clip_name = video_clipper.clip_event_video(
+                channel=channel,
+                event_timestamp=now,
+                output_filename=clip_filename,
+                event_type=event_type,
+                event_code=code
+            )
+            
+        event_id = database.save_event(
+            event_code=code,
+            event_type=event_type,
+            channel=channel,
+            timestamp=timestamp_str,
+            description=description,
+            severity=severity,
+            audio_level_db=audio_db,
+            metadata_dict=event_data,
+            clip_filename=clip_name
+        )
+        
+        event_obj = database.get_event_by_id(event_id)
+        if event_obj and self.broadcast_callback:
+            self.broadcast_callback(event_obj)
