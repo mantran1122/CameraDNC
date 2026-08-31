@@ -62,12 +62,18 @@ manager = ConnectionManager()
 
 nvr_listener = None
 simulator_thread = None
+# The FastAPI/Uvicorn event loop belongs to the server thread. Listener and
+# simulator threads use this stored reference to schedule WebSocket broadcasts.
+server_event_loop: Optional[asyncio.AbstractEventLoop] = None
 
 def broadcast_event_sync(event_obj: dict):
+    loop = server_event_loop
+    if loop is None or not loop.is_running():
+        # This is expected while the application is starting or stopping.
+        return
+
     try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            asyncio.run_coroutine_threadsafe(manager.broadcast(event_obj), loop)
+        asyncio.run_coroutine_threadsafe(manager.broadcast(event_obj), loop)
     except Exception as e:
         print(f"[WebSocket Broadcast Error] {e}")
 
@@ -91,17 +97,20 @@ def restart_listener_service():
 
 @app.on_event("startup")
 async def startup_event():
+    global server_event_loop
+    server_event_loop = asyncio.get_running_loop()
     database.init_db()
     restart_listener_service()
     print("[Server Startup] Dahua Internet Metadata & Anomaly Summarizer online.")
 
 @app.on_event("shutdown")
 async def shutdown_event():
-    global nvr_listener, simulator_thread
+    global nvr_listener, simulator_thread, server_event_loop
     if nvr_listener:
         nvr_listener.stop()
     if simulator_thread:
         simulator_thread.stop()
+    server_event_loop = None
 
 # --- ROUTES & APIS ---
 
