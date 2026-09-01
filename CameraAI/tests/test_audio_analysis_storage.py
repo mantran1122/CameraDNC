@@ -46,3 +46,19 @@ class AudioAnalysisStorageTest(unittest.TestCase):
         self.assertEqual(result["segments"][0]["text"], "Xin chao")
         self.assertEqual(result["suggestion"]["risk_level"], "low")
 
+    def test_finds_only_audio_alarms_with_a_clip_and_no_analysis(self):
+        pending_id = database.save_event(
+            event_code="FightSound", event_type="audio_anomaly", channel=7,
+            timestamp="2026-08-31 10:00:00", description="Sound", clip_filename="event.mp4",
+        )
+        completed_id = database.save_event(
+            event_code="SoundDetection", event_type="audio_anomaly", channel=1,
+            timestamp="2026-08-31 10:01:00", description="Sound", clip_filename="done.mp4",
+        )
+        database.create_audio_analysis(completed_id)
+        database.save_event(
+            event_code="HumanTrait", event_type="normal_metadata", channel=1,
+            timestamp="2026-08-31 10:02:00", description="Person", clip_filename="normal.mp4",
+        )
+
+        self.assertEqual(database.get_unanalyzed_audio_event_ids(), [pending_id])

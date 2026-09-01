@@ -96,8 +96,17 @@ def restart_listener_service():
 
     # Demo data must never be created while connected to a production NVR.
     if config.DEMO_MODE:
-        simulator_thread = NVRDataSimulator(broadcast_callback=broadcast_event_sync)
+        simulator_thread = NVRDataSimulator(
+            broadcast_callback=broadcast_event_sync,
+            audio_job_callback=audio_analysis_worker.enqueue,
+        )
         simulator_thread.start()
+
+    # Process alarm clips that were saved before this feature was enabled.
+    # The cap avoids a restart unexpectedly creating an unbounded backlog.
+    for event_id in database.get_unanalyzed_audio_event_ids(config.AUDIO_ANALYSIS_BACKFILL_LIMIT):
+        database.create_audio_analysis(event_id)
+        audio_analysis_worker.enqueue(event_id)
 
     nvr_listener = DahuaNVRListener(
         broadcast_callback=broadcast_event_sync,

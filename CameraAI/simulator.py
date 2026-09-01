@@ -8,9 +8,10 @@ import database
 import video_clipper
 
 class NVRDataSimulator(threading.Thread):
-    def __init__(self, broadcast_callback=None):
+    def __init__(self, broadcast_callback=None, audio_job_callback=None):
         super().__init__(daemon=True)
         self.broadcast_callback = broadcast_callback
+        self.audio_job_callback = audio_job_callback
         self.is_running = False
 
     def seed_historical_today_data(self):
@@ -65,7 +66,7 @@ class NVRDataSimulator(threading.Thread):
                     event_code=code
                 )
                 
-            database.save_event(
+            event_id = database.save_event(
                 event_code=code,
                 event_type=ev_type,
                 channel=ch,
@@ -76,6 +77,10 @@ class NVRDataSimulator(threading.Thread):
                 metadata_dict=meta,
                 clip_filename=clip_name
             )
+            if ev_type == "audio_anomaly" and clip_name:
+                database.create_audio_analysis(event_id)
+                if self.audio_job_callback:
+                    self.audio_job_callback(event_id)
 
     def run(self):
         self.is_running = True
@@ -148,6 +153,10 @@ class NVRDataSimulator(threading.Thread):
                 metadata_dict=meta,
                 clip_filename=clip_name
             )
+            if ev_type == "audio_anomaly" and clip_name:
+                database.create_audio_analysis(ev_id)
+                if self.audio_job_callback:
+                    self.audio_job_callback(ev_id)
             
             ev_obj = database.get_event_by_id(ev_id)
             if ev_obj and self.broadcast_callback:

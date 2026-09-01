@@ -238,5 +238,28 @@ def get_audio_analysis(event_id: int) -> Optional[Dict[str, Any]]:
             item[api_key] = None
     return item
 
+
+def get_unanalyzed_audio_event_ids(limit: int = 50) -> List[int]:
+    """Return stored audio alarms that have a replay clip but no analysis yet."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        SELECT e.id
+        FROM events e
+        LEFT JOIN audio_analyses a ON a.event_id = e.id
+        WHERE e.event_type = 'audio_anomaly'
+          AND e.clip_filename IS NOT NULL
+          AND e.clip_filename != ''
+          AND a.event_id IS NULL
+        ORDER BY e.id ASC
+        LIMIT ?
+        """,
+        (limit,),
+    )
+    ids = [row[0] for row in cursor.fetchall()]
+    conn.close()
+    return ids
+
 # Initialize DB on module import
 init_db()
