@@ -211,6 +211,37 @@ function renderAudioAnalysis(analysis) {
     }
 }
 
+function renderAudioAnalysisAction(ev) {
+    const button = document.getElementById('analyze-audio-btn');
+    if (!button) return;
+    const isAnomaly = ev && ['audio_anomaly', 'video_anomaly'].includes(ev.event_type);
+    const canAnalyse = isAnomaly && Boolean(ev?.clip_filename);
+    const status = ev?.audio_analysis?.status;
+    button.dataset.eventId = ev?.id || '';
+    button.hidden = !canAnalyse;
+    button.disabled = !canAnalyse || ['pending', 'waiting_for_post_buffer', 'downloading_clip', 'extracting_audio', 'transcribing', 'generating_suggestion', 'completed', 'no_audio'].includes(status);
+    button.textContent = status === 'failed' ? '↻ Thử lại phân tích' : '🎙 Phân tích giọng nói';
+}
+
+async function requestAudioAnalysis() {
+    const button = document.getElementById('analyze-audio-btn');
+    const eventId = button?.dataset.eventId;
+    if (!eventId || button.disabled) return;
+    button.disabled = true;
+    button.textContent = '⏳ Đang xếp hàng...';
+    try {
+        const response = await fetch(`/api/events/${encodeURIComponent(eventId)}/audio-analysis`, {method: 'POST'});
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Không thể tạo job phân tích.');
+        renderAudioAnalysis(data.audio_analysis);
+        renderAudioAnalysisAction({...data, id: Number(eventId), event_type: 'audio_anomaly', clip_filename: true});
+    } catch (error) {
+        button.disabled = false;
+        button.textContent = '🎙 Phân tích giọng nói';
+        setText('clip-audio-error', error.message);
+    }
+}
+
 // Render Chart.js Timeline
 function renderActivityChart(hourlyAll, hourlyAnomalies) {
     const ctx = document.getElementById('activityChart').getContext('2d');
@@ -359,6 +390,7 @@ async function openClipModal(eventId, clipFilename, description) {
         document.getElementById('clip-detail-type').innerText = `${ev.event_code} (${ev.event_type})`;
         document.getElementById('clip-detail-audio').innerText = ev.audio_level_db ? `${ev.audio_level_db} dB` : 'N/A';
         renderAudioAnalysis(ev.audio_analysis);
+        renderAudioAnalysisAction(ev);
     } catch(e) {}
 
     document.getElementById('videoModal').classList.add('active');

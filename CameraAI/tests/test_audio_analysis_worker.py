@@ -16,13 +16,20 @@ class AudioAnalysisWorkerTest(unittest.TestCase):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.original_db_path = database.DB_PATH
         self.original_post_buffer = config.POST_BUFFER_SEC
+        self.original_clips_dir = config.CLIPS_DIR
+        self.original_suggestion_url = config.AUDIO_SUGGESTION_API_URL
         database.DB_PATH = Path(self.temp_dir.name) / "camera_metadata.db"
         config.POST_BUFFER_SEC = 0
+        config.CLIPS_DIR = Path(self.temp_dir.name) / "clips"
+        config.CLIPS_DIR.mkdir()
+        config.AUDIO_SUGGESTION_API_URL = ""
         database.init_db()
 
     def tearDown(self):
         database.DB_PATH = self.original_db_path
         config.POST_BUFFER_SEC = self.original_post_buffer
+        config.CLIPS_DIR = self.original_clips_dir
+        config.AUDIO_SUGGESTION_API_URL = self.original_suggestion_url
         self.temp_dir.cleanup()
 
     def test_clip_without_audio_is_recorded_as_no_audio(self):
@@ -45,6 +52,26 @@ class AudioAnalysisWorkerTest(unittest.TestCase):
         self.assertEqual(analysis["status"], "no_audio")
         self.assertEqual(analysis["ignored_reason"], "no_audio_track")
         self.assertEqual(event["clip_filename"], "event.mp4")
+
+    def test_existing_clip_is_used_for_manual_analysis(self):
+        event_id = database.save_event(
+            event_code="FightSound",
+            event_type="audio_anomaly",
+            channel=7,
+            timestamp=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            description="Sound detected",
+            clip_filename="reviewable.mp4",
+        )
+        (config.CLIPS_DIR / "reviewable.mp4").write_bytes(b"placeholder")
+        database.create_audio_analysis(event_id)
+        worker = audio_analysis_worker.AudioAnalysisWorker()
+
+        with patch.object(audio_analysis_worker.video_clipper, "clip_event_video") as clip_event_video:
+            with patch.object(worker, "_has_audio_stream", return_value=False):
+                worker._process(event_id)
+
+        clip_event_video.assert_not_called()
+        self.assertEqual(database.get_audio_analysis(event_id)["status"], "no_audio")
 
     def test_suggestion_is_grounded_and_validated(self):
         worker = audio_analysis_worker.AudioAnalysisWorker()

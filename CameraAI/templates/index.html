@@ -183,7 +183,10 @@
                     <div><strong>Cường độ âm thanh:</strong> <span id="clip-detail-audio">-</span></div>
                 </div>
                 <section class="audio-analysis-panel" aria-live="polite">
-                    <div class="audio-analysis-title">Phân tích âm thanh</div>
+                    <div class="audio-analysis-title">
+                        <span>Phân tích âm thanh</span>
+                        <button id="analyze-audio-btn" class="btn-analyze-audio" type="button" onclick="requestAudioAnalysis()">🎙 Phân tích giọng nói</button>
+                    </div>
                     <div id="clip-audio-status" class="audio-status">Chưa có dữ liệu</div>
                     <div class="audio-analysis-grid">
                         <div><strong>Transcript:</strong><p id="clip-audio-transcript">-</p></div>

@@ -162,6 +162,36 @@ async def get_event_detail(event_id: int):
     ev["audio_analysis"] = database.get_audio_analysis(event_id)
     return ev
 
+@app.post("/api/events/{event_id}/audio-analysis")
+async def request_audio_analysis(event_id: int):
+    """Queue speech-to-text for the anomaly clip selected by an operator."""
+    event = database.get_event_by_id(event_id)
+    if not event:
+        return JSONResponse(status_code=404, content={"error": "Event not found"})
+    if event["event_type"] not in {"audio_anomaly", "video_anomaly"}:
+        return JSONResponse(status_code=400, content={"error": "Chỉ sự kiện bất thường mới có thể phân tích âm thanh."})
+    if not event.get("clip_filename"):
+        return JSONResponse(status_code=409, content={"error": "Sự kiện này chưa có clip để phân tích."})
+    clip_path = config.CLIPS_DIR / os.path.basename(str(event["clip_filename"]))
+    if not clip_path.is_file():
+        return JSONResponse(status_code=409, content={"error": "Không tìm thấy file clip đang xem lại để phân tích."})
+    if audio_analysis_worker is None:
+        return JSONResponse(status_code=503, content={"error": "Audio worker chưa sẵn sàng."})
+
+    analysis = database.get_audio_analysis(event_id)
+    active_statuses = {"pending", "waiting_for_post_buffer", "downloading_clip", "extracting_audio", "transcribing", "generating_suggestion"}
+    if analysis and analysis["status"] in active_statuses | {"completed", "no_audio"}:
+        return {"queued": False, "audio_analysis": analysis}
+
+    if analysis is None:
+        database.create_audio_analysis(event_id)
+    else:
+        database.update_audio_analysis(event_id, status="pending", error_message=None)
+    analysis = database.get_audio_analysis(event_id)
+    broadcast_audio_analysis_update(event_id)
+    audio_analysis_worker.enqueue(event_id)
+    return {"queued": True, "audio_analysis": analysis}
+
 @app.get("/api/summary/daily")
 async def get_daily_summary_api(date_str: Optional[str] = None):
     summary = summary_engine.generate_daily_summary(date_str)
