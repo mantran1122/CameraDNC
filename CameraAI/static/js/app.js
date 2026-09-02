@@ -1,4 +1,5 @@
 let activityChart = null;
+let audioAnalysisPollTimer = null;
 
 document.addEventListener('DOMContentLoaded', () => {
     fetchDailySummary();
@@ -266,11 +267,43 @@ async function requestAudioAnalysis() {
         if (!response.ok) throw new Error(data.error || 'Không thể tạo job phân tích.');
         renderAudioAnalysis(data.audio_analysis);
         renderAudioAnalysisAction({...data, id: Number(eventId), event_type: 'audio_anomaly', clip_filename: true});
+        startAudioAnalysisPolling(eventId);
     } catch (error) {
         button.disabled = false;
         button.textContent = '🎙 Phân tích giọng nói';
         setText('clip-audio-error', error.message);
     }
+}
+
+function startAudioAnalysisPolling(eventId) {
+    if (audioAnalysisPollTimer) clearInterval(audioAnalysisPollTimer);
+    const terminalStatuses = new Set([
+        'not_analyzed', 'video_missing', 'no_audio_track', 'audio_too_quiet',
+        'no_speech_detected', 'stt_failed', 'transcribed', 'completed',
+    ]);
+    let attempts = 0;
+    const refresh = async () => {
+        attempts += 1;
+        try {
+            const response = await fetch(`/api/events/${encodeURIComponent(eventId)}`);
+            if (!response.ok) throw new Error('Không thể cập nhật trạng thái phân tích.');
+            const event = await response.json();
+            renderAudioAnalysis(event.audio_analysis);
+            renderAudioAnalysisAction(event);
+            if (terminalStatuses.has(event.audio_analysis?.status) || attempts >= 150) {
+                clearInterval(audioAnalysisPollTimer);
+                audioAnalysisPollTimer = null;
+            }
+        } catch (error) {
+            if (attempts >= 150) {
+                clearInterval(audioAnalysisPollTimer);
+                audioAnalysisPollTimer = null;
+                setText('clip-audio-error', error.message);
+            }
+        }
+    };
+    refresh();
+    audioAnalysisPollTimer = setInterval(refresh, 1000);
 }
 
 // Render Chart.js Timeline
@@ -430,6 +463,10 @@ async function openClipModal(eventId, clipFilename, description) {
 }
 
 function closeClipModal() {
+    if (audioAnalysisPollTimer) {
+        clearInterval(audioAnalysisPollTimer);
+        audioAnalysisPollTimer = null;
+    }
     const videoElem = document.getElementById('modal-video-player');
     if (videoElem) {
         videoElem.pause();

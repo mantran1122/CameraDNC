@@ -28,7 +28,10 @@ class DahuaNVRListener(threading.Thread):
         protocol = "https" if config.USE_HTTPS else "http"
         url = (
             f"{protocol}://{config.NVR_HOST}:{config.NVR_PORT}/cgi-bin/eventManager.cgi"
-            f"?action=attach&codes=[{','.join(config.EVENT_CODES)}]"
+            # Dahua firmwares differ in which individual event codes they
+            # accept.  Subscribe to All and classify/filter locally so one
+            # unsupported code cannot silently suppress the whole stream.
+            "?action=attach&codes=[All]"
         )
         print(f"[DahuaClient] Connecting to Dahua NVR event stream over Internet/WAN: {url}")
         
@@ -74,13 +77,14 @@ class DahuaNVRListener(threading.Thread):
                 key, val = field.split("=", 1)
                 key = key.strip()
                 if key:
-                    event_data[key] = val.strip()
+                    canonical_key = {"code": "Code", "action": "action", "index": "index"}.get(key.lower(), key)
+                    event_data[canonical_key] = val.strip()
                 
         code = event_data.get("Code")
         action = event_data.get("action")
         index = event_data.get("index", "0")
         
-        if not code or action != "Start":
+        if not code or str(action).lower() != "start":
             return
             
         channel = int(index) + 1 if index.isdigit() else 1

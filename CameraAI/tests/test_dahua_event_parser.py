@@ -20,6 +20,14 @@ class DahuaEventParserTest(unittest.TestCase):
         self.assertEqual(save_event.call_args.kwargs["channel"], 5)
         self.assertEqual(save_event.call_args.kwargs["metadata_dict"]["action"], "Start")
 
+    def test_accepts_case_variants_from_nvr_firmware(self):
+        listener = dahua_client.DahuaNVRListener()
+        with patch.object(dahua_client.config, "ACTIVE_CHANNELS", [1]), \
+             patch.object(dahua_client.database, "save_event", return_value=43) as save_event, \
+             patch.object(dahua_client.database, "get_event_by_id", return_value=None):
+            listener.process_event_block("code=HumanTrait;Action=START;Index=0")
+        self.assertEqual(save_event.call_args.kwargs["event_code"], "HumanTrait")
+
     def test_selected_metadata_behavior_is_queued_as_anomaly_for_clip_capture(self):
         audio_job_callback = Mock()
         listener = dahua_client.DahuaNVRListener(audio_job_callback=audio_job_callback)
