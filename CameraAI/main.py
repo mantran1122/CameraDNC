@@ -204,6 +204,7 @@ async def request_audio_analysis(event_id: int):
     database.update_audio_analysis(event_id, status="processing", error_message=None)
     analysis = database.get_audio_analysis(event_id)
     broadcast_audio_analysis_update(event_id)
+    print(f"[AUDIO] alert={event_id} queued by API")
     audio_analysis_worker.enqueue(event_id)
     return {"queued": True, "audio_analysis": analysis}
 

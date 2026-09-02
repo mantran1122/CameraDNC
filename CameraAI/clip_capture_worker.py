@@ -31,6 +31,8 @@ class ClipCaptureWorker:
             self._thread.join(timeout=2)
 
     def enqueue(self, event_id: int) -> None:
+        if not self._thread or not self._thread.is_alive():
+            self.start()
         self._queue.put(event_id)
 
     def _run(self) -> None:
@@ -54,11 +56,18 @@ class ClipCaptureWorker:
         if delay > 0:
             time.sleep(delay)
         print(f"[CLIP] alert={event_id} capturing 10s evidence")
-        filename = video_clipper.clip_event_video(
-            channel=event["channel"], event_timestamp=event_time,
-            output_filename=f"clip_ch{event['channel']}_{event_time.strftime('%Y%m%d_%H%M%S')}.mp4",
-            event_type=event["event_type"], event_code=event["event_code"],
-        )
+        filename = None
+        for attempt in range(1, 4):
+            print(f"[CLIP] alert={event_id} capture attempt={attempt}/3")
+            filename = video_clipper.clip_event_video(
+                channel=event["channel"], event_timestamp=event_time,
+                output_filename=f"clip_ch{event['channel']}_{event_time.strftime('%Y%m%d_%H%M%S')}.mp4",
+                event_type=event["event_type"], event_code=event["event_code"],
+            )
+            if filename:
+                break
+            if attempt < 3:
+                time.sleep(5)
         if filename:
             database.update_event_clip(event_id, filename)
             print(f"[CLIP] alert={event_id} evidence={filename}")

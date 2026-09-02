@@ -43,6 +43,12 @@ class AudioAnalysisWorker:
         self._thread = None
 
     def enqueue(self, event_id: int) -> None:
+        # A configuration restart may have stopped the old worker while a
+        # browser still has a modal open. Never leave that request in
+        # ``processing`` merely because the consumer thread is gone.
+        if not self._thread or not self._thread.is_alive():
+            self.start()
+        print(f"[AUDIO] alert={event_id} analysis requested")
         self._queue.put(event_id)
 
     def _run(self) -> None:
@@ -53,7 +59,11 @@ class AudioAnalysisWorker:
                 continue
             if event_id is None:
                 continue
-            self._process(event_id)
+            try:
+                self._process(event_id)
+            except Exception as exc:
+                print(f"[AUDIO] alert={event_id} unhandled worker error: {exc}")
+                self._set_status(event_id, "stt_failed", error_message=f"Audio worker lỗi: {exc}")
 
     def _set_status(self, event_id: int, status: str, **values) -> None:
         database.update_audio_analysis(event_id, status=status, **values)
