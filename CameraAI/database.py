@@ -1,6 +1,6 @@
 import sqlite3
 import json
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from typing import List, Dict, Any, Optional
 from config import STORAGE_DIR
 
@@ -174,6 +174,24 @@ def update_event_clip(event_id: int, clip_filename: str):
     cursor.execute("UPDATE events SET clip_filename = ? WHERE id = ?", (clip_filename, event_id))
     conn.commit()
     conn.close()
+
+
+def delete_expired_events(retention_days: int) -> List[str]:
+    """Delete expired metadata and return the associated clip filenames."""
+    cutoff = (datetime.now() - timedelta(days=retention_days)).strftime("%Y-%m-%d %H:%M:%S")
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, clip_filename FROM events WHERE timestamp < ?", (cutoff,))
+    expired = cursor.fetchall()
+    event_ids = [row["id"] for row in expired]
+    filenames = [row["clip_filename"] for row in expired if row["clip_filename"]]
+    if event_ids:
+        placeholders = ",".join("?" for _ in event_ids)
+        cursor.execute(f"DELETE FROM audio_analyses WHERE event_id IN ({placeholders})", event_ids)
+        cursor.execute(f"DELETE FROM events WHERE id IN ({placeholders})", event_ids)
+    conn.commit()
+    conn.close()
+    return filenames
 
 
 def create_audio_analysis(event_id: int, status: str = "not_analyzed") -> bool:

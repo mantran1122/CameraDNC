@@ -1,6 +1,7 @@
 import os
 import json
 import asyncio
+import threading
 from urllib.parse import quote
 from typing import List, Optional
 from datetime import date
@@ -67,6 +68,8 @@ nvr_listener = None
 simulator_thread = None
 audio_analysis_worker = None
 clip_capture_worker = None
+metadata_cleanup_stop = threading.Event()
+metadata_cleanup_thread = None
 # The FastAPI/Uvicorn event loop belongs to the server thread. Listener and
 # simulator threads use this stored reference to schedule WebSocket broadcasts.
 server_event_loop: Optional[asyncio.AbstractEventLoop] = None
@@ -116,15 +119,18 @@ def restart_listener_service():
 
 @app.on_event("startup")
 async def startup_event():
-    global server_event_loop
+    global server_event_loop, metadata_cleanup_thread
     server_event_loop = asyncio.get_running_loop()
     database.init_db()
+    metadata_cleanup_stop.clear()
+    metadata_cleanup_thread = threading.Thread(target=metadata_cleanup_loop, daemon=True, name="metadata-cleanup-worker")
+    metadata_cleanup_thread.start()
     restart_listener_service()
     print("[Server Startup] Dahua Internet Metadata & Anomaly Summarizer online.")
 
 @app.on_event("shutdown")
 async def shutdown_event():
-    global nvr_listener, simulator_thread, audio_analysis_worker, clip_capture_worker, server_event_loop
+    global nvr_listener, simulator_thread, audio_analysis_worker, clip_capture_worker, metadata_cleanup_thread, server_event_loop
     if nvr_listener:
         nvr_listener.stop()
     if simulator_thread:
@@ -133,6 +139,10 @@ async def shutdown_event():
         audio_analysis_worker.stop()
     if clip_capture_worker:
         clip_capture_worker.stop()
+    metadata_cleanup_stop.set()
+    if metadata_cleanup_thread:
+        metadata_cleanup_thread.join(timeout=2)
+        metadata_cleanup_thread = None
     server_event_loop = None
 
 
@@ -141,6 +151,25 @@ def broadcast_audio_analysis_update(event_id: int):
     if event:
         event["audio_analysis"] = database.get_audio_analysis(event_id)
         broadcast_event_sync(event)
+
+def purge_expired_metadata() -> None:
+    filenames = database.delete_expired_events(config.METADATA_RETENTION_DAYS)
+    removed_clips = 0
+    for filename in filenames:
+        clip_path = config.CLIPS_DIR / os.path.basename(filename)
+        try:
+            if clip_path.is_file():
+                clip_path.unlink()
+                removed_clips += 1
+        except OSError as exc:
+            print(f"[Cleanup] Could not remove expired clip {clip_path.name}: {exc}")
+    if filenames:
+        print(f"[Cleanup] Removed {len(filenames)} expired events and {removed_clips} clips (retention={config.METADATA_RETENTION_DAYS} days).")
+
+def metadata_cleanup_loop() -> None:
+    while not metadata_cleanup_stop.is_set():
+        purge_expired_metadata()
+        metadata_cleanup_stop.wait(6 * 60 * 60)
 
 # --- ROUTES & APIS ---
 

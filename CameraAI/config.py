@@ -26,6 +26,7 @@ DEFAULT_CONFIG = {
     # Give the NVR index a moment to publish the final post-event recording
     # segment before requesting playback.
     "clip_ready_delay_sec": 2,
+    "metadata_retention_days": 3,
     # Metadata codes selected here are treated as abnormal behaviour. A 10s
     # replay clip is saved for each selected event.
     "abnormal_event_codes": ["Intrusion", "CrossLine", "Fight", "AudioAnomaly", "SoundDetection"]
@@ -63,6 +64,7 @@ PRE_BUFFER_SEC = _current_cfg.get("pre_buffer_sec", 5)
 POST_BUFFER_SEC = _current_cfg.get("post_buffer_sec", 5)
 CLIP_DURATION_SEC = PRE_BUFFER_SEC + POST_BUFFER_SEC
 CLIP_READY_DELAY_SEC = _current_cfg.get("clip_ready_delay_sec", 2)
+METADATA_RETENTION_DAYS = max(1, int(_current_cfg.get("metadata_retention_days", 3)))
 COSMOS_AUDIO_URL = os.getenv("COSMOS_AUDIO_URL", "http://127.0.0.1:8765/transcribe")
 AUDIO_ANALYSIS_BACKFILL_LIMIT = max(0, int(os.getenv("AUDIO_ANALYSIS_BACKFILL_LIMIT", "50")))
 # Optional OpenAI-compatible endpoint used only to turn completed audio evidence
