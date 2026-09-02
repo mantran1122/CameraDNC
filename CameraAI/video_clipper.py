@@ -17,6 +17,25 @@ def _remove_partial_clip(output_path: str) -> None:
     except OSError as exc:
         print(f"[VideoClipper Warning] Could not remove partial clip {output_path}: {exc}")
 
+
+def _has_expected_duration(output_path: str) -> bool:
+    """Reject truncated NVR playback responses instead of serving a short clip."""
+    try:
+        result = subprocess.run(
+            [
+                config.FFPROBE_PATH, "-v", "error", "-show_entries", "format=duration",
+                "-of", "default=noprint_wrappers=1:nokey=1", output_path,
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=15,
+        )
+        duration = float(result.stdout.strip()) if result.returncode == 0 else 0.0
+        return duration >= max(0.0, config.CLIP_DURATION_SEC - 0.5)
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return False
+
 def generate_synthetic_anomaly_clip(
     output_path: str,
     channel: int,
@@ -170,6 +189,7 @@ def clip_event_video(
         config.FFMPEG_PATH,
         "-y",
         "-rtsp_transport", "tcp",
+        "-fflags", "+genpts",
         "-i", rtsp_url,
         "-t", str(config.CLIP_DURATION_SEC),
         "-c:v", "libx264",
@@ -180,12 +200,12 @@ def clip_event_video(
     ]
     
     try:
-        res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=20)
-        if res.returncode == 0 and os.path.exists(full_output_path):
+        res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=45)
+        if res.returncode == 0 and os.path.exists(full_output_path) and _has_expected_duration(full_output_path):
             return output_filename
         print(
-            "[FFmpeg Warning] WAN/RTSP clip extraction failed or timed out; "
-            "no clip will be stored in production."
+            "[FFmpeg Warning] WAN/RTSP clip extraction failed, timed out, or returned a short clip; "
+            "no incomplete clip will be stored in production."
         )
         _remove_partial_clip(full_output_path)
         return None

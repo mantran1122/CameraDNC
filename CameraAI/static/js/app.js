@@ -194,8 +194,8 @@ function formatAudioStatus(analysis) {
         transcribing: 'Đang phân tích âm thanh',
         generating_suggestion: 'Đang tạo gợi ý',
         completed: 'Đã phân tích',
-        no_audio: 'Không có audio',
-        failed: 'Lỗi phân tích',
+        no_audio: 'Clip không có âm thanh',
+        failed: 'Không thể phân tích âm thanh',
     };
     return labels[analysis.status] || analysis.status;
 }
@@ -208,7 +208,12 @@ function setText(id, value, fallback = '-') {
 function renderAudioAnalysis(analysis) {
     const status = formatAudioStatus(analysis);
     setText('clip-audio-status', status, 'Chưa có dữ liệu');
-    setText('clip-audio-transcript', analysis?.transcript, analysis?.status === 'no_audio' ? 'Clip không có audio track.' : 'Chưa có transcript.');
+    const transcriptFallback = analysis?.status === 'no_audio'
+        ? 'Clip không có track âm thanh nên không thể phân tích.'
+        : analysis?.status === 'failed'
+            ? 'Không thể phân tích âm thanh. Xem thông báo lỗi bên dưới hoặc thử lại.'
+            : 'Chưa có transcript.';
+    setText('clip-audio-transcript', analysis?.transcript, transcriptFallback);
     const suggestion = analysis?.suggestion;
     setText('clip-audio-summary', suggestion?.summary, 'Chưa có gợi ý.');
     setText('clip-audio-risk', suggestion?.risk_level, '-');

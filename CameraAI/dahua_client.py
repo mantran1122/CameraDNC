@@ -8,7 +8,6 @@ from requests.auth import HTTPDigestAuth
 
 import config
 import database
-import video_clipper
 
 class DahuaNVRListener(threading.Thread):
     def __init__(self, broadcast_callback=None, audio_job_callback=None):
@@ -113,17 +112,6 @@ class DahuaNVRListener(threading.Thread):
         elif code in ["VehicleTrait"]:
             description = f"Metadata Phương tiện: Phát hiện xe tại Cam {channel:02d}"
 
-        clip_name = None
-        if event_type in {"audio_anomaly", "video_anomaly"}:
-            clip_filename = f"clip_ch{channel}_{now.strftime('%Y%m%d_%H%M%S')}.mp4"
-            clip_name = video_clipper.clip_event_video(
-                channel=channel,
-                event_timestamp=now,
-                output_filename=clip_filename,
-                event_type=event_type,
-                event_code=code
-            )
-            
         event_id = database.save_event(
             event_code=code,
             event_type=event_type,
@@ -133,9 +121,11 @@ class DahuaNVRListener(threading.Thread):
             severity=severity,
             audio_level_db=audio_db,
             metadata_dict=event_data,
-            clip_filename=clip_name
         )
-        if event_type == "audio_anomaly":
+        if event_type in {"audio_anomaly", "video_anomaly"}:
+            # The worker waits until the NVR has committed the post-event
+            # buffer, then captures the full 10 seconds and reports the audio
+            # result (including a missing audio track) to the dashboard.
             database.create_audio_analysis(event_id)
             if self.audio_job_callback:
                 self.audio_job_callback(event_id)

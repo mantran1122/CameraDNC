@@ -65,16 +65,19 @@ class AudioAnalysisWorker:
 
         try:
             event_time = datetime.strptime(event["timestamp"], "%Y-%m-%d %H:%M:%S")
-            delay = config.POST_BUFFER_SEC - (datetime.now() - event_time).total_seconds()
-            if delay > 0:
-                self._set_status(event_id, "waiting_for_post_buffer")
-                time.sleep(delay)
-
             # A manual request from the dashboard must analyse the exact clip
             # the operator is reviewing, not ask the NVR to cut it again.
             saved_clip = Path(str(event.get("clip_filename") or "")).name
             clip_path = Path(config.CLIPS_DIR) / saved_clip if saved_clip else None
             if clip_path is None or not clip_path.is_file():
+                delay = (
+                    config.POST_BUFFER_SEC
+                    + config.CLIP_READY_DELAY_SEC
+                    - (datetime.now() - event_time).total_seconds()
+                )
+                if delay > 0:
+                    self._set_status(event_id, "waiting_for_post_buffer")
+                    time.sleep(delay)
                 self._set_status(event_id, "downloading_clip")
                 clip_filename = f"clip_ch{event['channel']}_{event_time.strftime('%Y%m%d_%H%M%S')}.mp4"
                 clip_filename = video_clipper.clip_event_video(
@@ -85,7 +88,11 @@ class AudioAnalysisWorker:
                     event_code=event["event_code"],
                 )
                 if not clip_filename:
-                    self._set_status(event_id, "failed", error_message="Không thể tải clip thật từ NVR.")
+                    self._set_status(
+                        event_id,
+                        "failed",
+                        error_message="Không thể lấy clip 10 giây hoàn chỉnh từ NVR; không thể phân tích âm thanh.",
+                    )
                     return
                 database.update_event_clip(event_id, clip_filename)
                 self._notify(event_id)
