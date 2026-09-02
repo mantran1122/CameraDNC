@@ -32,24 +32,25 @@ class AudioAnalysisWorkerTest(unittest.TestCase):
         config.AUDIO_SUGGESTION_API_URL = self.original_suggestion_url
         self.temp_dir.cleanup()
 
-    def test_clip_without_audio_is_recorded_as_no_audio(self):
+    def test_clip_without_audio_is_recorded_as_no_audio_track(self):
         event_id = database.save_event(
             event_code="SoundDetection",
             event_type="audio_anomaly",
             channel=1,
             timestamp=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             description="Sound detected",
+            clip_filename="event.mp4",
         )
+        (config.CLIPS_DIR / "event.mp4").write_bytes(b"placeholder")
         database.create_audio_analysis(event_id)
         worker = audio_analysis_worker.AudioAnalysisWorker()
 
-        with patch.object(audio_analysis_worker.video_clipper, "clip_event_video", return_value="event.mp4"):
-            with patch.object(worker, "_has_audio_stream", return_value=False):
-                worker._process(event_id)
+        with patch.object(worker, "_has_audio_stream", return_value=False):
+            worker._process(event_id)
 
         analysis = database.get_audio_analysis(event_id)
         event = database.get_event_by_id(event_id)
-        self.assertEqual(analysis["status"], "no_audio")
+        self.assertEqual(analysis["status"], "no_audio_track")
         self.assertEqual(analysis["ignored_reason"], "no_audio_track")
         self.assertEqual(event["clip_filename"], "event.mp4")
 
@@ -66,12 +67,32 @@ class AudioAnalysisWorkerTest(unittest.TestCase):
         database.create_audio_analysis(event_id)
         worker = audio_analysis_worker.AudioAnalysisWorker()
 
-        with patch.object(audio_analysis_worker.video_clipper, "clip_event_video") as clip_event_video:
-            with patch.object(worker, "_has_audio_stream", return_value=False):
-                worker._process(event_id)
+        with patch.object(worker, "_has_audio_stream", return_value=False):
+            worker._process(event_id)
 
-        clip_event_video.assert_not_called()
-        self.assertEqual(database.get_audio_analysis(event_id)["status"], "no_audio")
+        self.assertEqual(database.get_audio_analysis(event_id)["status"], "no_audio_track")
+
+    def test_quiet_audio_skips_stt(self):
+        event_id = database.save_event("HumanTrait", "video_anomaly", 1, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "Alert", clip_filename="quiet.mp4")
+        (config.CLIPS_DIR / "quiet.mp4").write_bytes(b"placeholder")
+        wav_path = config.CLIPS_DIR / "quiet.wav"
+        wav_path.write_bytes(b"placeholder")
+        database.create_audio_analysis(event_id)
+        worker = audio_analysis_worker.AudioAnalysisWorker()
+        with patch.object(worker, "_has_audio_stream", return_value=True), \
+             patch.object(worker, "_extract_wav", return_value=str(wav_path)), \
+             patch.object(worker, "_wav_rms_dbfs", return_value=-70), \
+             patch.object(worker, "_transcribe") as transcribe:
+            worker._process(event_id)
+        self.assertEqual(database.get_audio_analysis(event_id)["status"], "audio_too_quiet")
+        transcribe.assert_not_called()
+
+    def test_missing_evidence_is_reported_without_downloading_or_stt(self):
+        event_id = database.save_event("Intrusion", "video_anomaly", 1, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "Alert")
+        database.create_audio_analysis(event_id)
+        worker = audio_analysis_worker.AudioAnalysisWorker()
+        worker._process(event_id)
+        self.assertEqual(database.get_audio_analysis(event_id)["status"], "video_missing")
 
     def test_suggestion_is_grounded_and_validated(self):
         worker = audio_analysis_worker.AudioAnalysisWorker()

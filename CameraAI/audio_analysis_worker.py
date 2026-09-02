@@ -8,6 +8,9 @@ import subprocess
 import tempfile
 import threading
 import time
+import math
+import wave
+from array import array
 from datetime import datetime
 from pathlib import Path
 from typing import Callable, Optional
@@ -16,7 +19,6 @@ import requests
 
 import config
 import database
-import video_clipper
 
 
 class AudioAnalysisWorker:
@@ -64,63 +66,32 @@ class AudioAnalysisWorker:
             return
 
         try:
-            event_time = datetime.strptime(event["timestamp"], "%Y-%m-%d %H:%M:%S")
-            # A manual request from the dashboard must analyse the exact clip
-            # the operator is reviewing, not ask the NVR to cut it again.
             saved_clip = Path(str(event.get("clip_filename") or "")).name
             clip_path = Path(config.CLIPS_DIR) / saved_clip if saved_clip else None
             if clip_path is None or not clip_path.is_file():
-                delay = (
-                    config.POST_BUFFER_SEC
-                    + config.CLIP_READY_DELAY_SEC
-                    - (datetime.now() - event_time).total_seconds()
-                )
-                if delay > 0:
-                    self._set_status(event_id, "waiting_for_post_buffer")
-                    time.sleep(delay)
-                self._set_status(event_id, "downloading_clip")
-                clip_filename = f"clip_ch{event['channel']}_{event_time.strftime('%Y%m%d_%H%M%S')}.mp4"
-                clip_filename = video_clipper.clip_event_video(
-                    channel=event["channel"],
-                    event_timestamp=event_time,
-                    output_filename=clip_filename,
-                    event_type=event["event_type"],
-                    event_code=event["event_code"],
-                )
-                if not clip_filename:
-                    self._set_status(
-                        event_id,
-                        "failed",
-                        error_message="Không thể lấy clip 10 giây hoàn chỉnh từ NVR; không thể phân tích âm thanh.",
-                    )
-                    return
-                database.update_event_clip(event_id, clip_filename)
-                self._notify(event_id)
-                clip_path = Path(config.CLIPS_DIR) / clip_filename
+                self._set_status(event_id, "video_missing", error_message="Không tìm thấy video evidence của cảnh báo.")
+                return
 
+            print(f"[AUDIO] alert={event_id} video={clip_path}")
             self._set_status(event_id, "extracting_audio")
             if not self._has_audio_stream(clip_path):
                 transcription = {"transcript": "", "speech_detected": 0, "ignored_reason": "no_audio_track"}
-                self._set_status(event_id, "no_audio", **transcription)
-                # No audio track is a valid result.  It may still receive a
-                # metadata-only suggestion, with evidence explicitly labelled.
-                suggestion, suggestion_error = self._create_suggestion(event, transcription)
-                self._set_status(
-                    event_id,
-                    "no_audio",
-                    suggestion=suggestion,
-                    error_message=suggestion_error,
-                    analyzed_at=datetime.now().astimezone().isoformat(timespec="seconds"),
-                )
+                print(f"[AUDIO] alert={event_id} audio_stream=false status=no_audio_track")
+                self._set_status(event_id, "no_audio_track", **transcription)
                 return
 
             wav_path = self._extract_wav(clip_path)
             try:
+                audio_rms = self._wav_rms_dbfs(wav_path)
+                print(f"[AUDIO] alert={event_id} audio_stream=true rms={audio_rms:.1f}dBFS")
+                if audio_rms < -50:
+                    self._set_status(event_id, "audio_too_quiet", audio_rms=audio_rms, ignored_reason="audio_too_quiet")
+                    return
                 self._transcribe(event_id, event, wav_path)
             finally:
                 Path(wav_path).unlink(missing_ok=True)
         except Exception as exc:
-            self._set_status(event_id, "failed", error_message=str(exc))
+            self._set_status(event_id, "stt_failed", error_message=str(exc))
 
     def _has_audio_stream(self, clip_path: Path) -> bool:
         result = subprocess.run(
@@ -148,6 +119,18 @@ class AudioAnalysisWorker:
             raise RuntimeError("Không thể tách WAV 16 kHz từ clip.")
         return wav_path
 
+    @staticmethod
+    def _wav_rms_dbfs(wav_path: str) -> float:
+        with wave.open(wav_path, "rb") as wav_file:
+            if wav_file.getsampwidth() != 2:
+                raise RuntimeError("WAV không phải PCM 16-bit.")
+            samples = array("h")
+            samples.frombytes(wav_file.readframes(wav_file.getnframes()))
+        if not samples:
+            return -120.0
+        rms = math.sqrt(sum(sample * sample for sample in samples) / len(samples))
+        return 20 * math.log10(max(rms / 32768.0, 1e-6))
+
     def _transcribe(self, event_id: int, event: dict, wav_path: str) -> None:
         self._set_status(event_id, "transcribing")
         health_url = config.COSMOS_AUDIO_URL.rsplit("/", 1)[0] + "/health"
@@ -155,10 +138,10 @@ class AudioAnalysisWorker:
             health = requests.get(health_url, timeout=5)
             health_data = health.json() if health.ok else {}
         except requests.RequestException as exc:
-            self._set_status(event_id, "failed", error_message=f"Cosmos chưa sẵn sàng: {exc}")
+            self._set_status(event_id, "stt_failed", error_message=f"Cosmos chưa sẵn sàng: {exc}")
             return
         if health_data.get("status") != "ready":
-            self._set_status(event_id, "failed", error_message=f"Cosmos chưa sẵn sàng: {health_data.get('status', health.status_code)}")
+            self._set_status(event_id, "stt_failed", error_message=f"Cosmos chưa sẵn sàng: {health_data.get('status', health.status_code)}")
             return
 
         wav_bytes = Path(wav_path).read_bytes()
@@ -172,11 +155,11 @@ class AudioAnalysisWorker:
         }
         response = requests.post(config.COSMOS_AUDIO_URL, data=wav_bytes, headers=headers, timeout=90)
         if not response.ok:
-            self._set_status(event_id, "failed", error_message=f"Cosmos transcription failed: HTTP {response.status_code}")
+            self._set_status(event_id, "stt_failed", error_message=f"Cosmos transcription failed: HTTP {response.status_code}")
             return
         result = response.json()
         if result.get("status") != "ok":
-            self._set_status(event_id, "failed", error_message=result.get("detail", "Cosmos transcription failed"))
+            self._set_status(event_id, "stt_failed", error_message=result.get("detail", "Cosmos transcription failed"))
             return
         transcription = {
             "transcript": result.get("text", ""),
@@ -186,8 +169,14 @@ class AudioAnalysisWorker:
             "ignored_reason": result.get("ignored_reason"),
             "audio_model": result.get("audio_model"),
         }
-        self._set_status(event_id, "generating_suggestion", **transcription)
+        if not transcription["transcript"].strip() or not transcription["speech_detected"]:
+            self._set_status(event_id, "no_speech_detected", **transcription)
+            return
+        self._set_status(event_id, "analyzing", **transcription)
         suggestion, suggestion_error = self._create_suggestion(event, transcription)
+        if suggestion_error:
+            self._set_status(event_id, "transcribed", error_message=suggestion_error)
+            return
         self._set_status(
             event_id,
             "completed",

@@ -77,8 +77,8 @@ class NVRDataSimulator(threading.Thread):
                 metadata_dict=meta,
                 clip_filename=clip_name
             )
-            if ev_type == "audio_anomaly" and clip_name:
-                database.create_audio_analysis(event_id)
+            if ev_type in {"audio_anomaly", "video_anomaly"}:
+                database.create_audio_analysis(event_id, status="not_analyzed")
                 if self.audio_job_callback:
                     self.audio_job_callback(event_id)
 
@@ -153,8 +153,8 @@ class NVRDataSimulator(threading.Thread):
                 metadata_dict=meta,
                 clip_filename=clip_name
             )
-            if ev_type == "audio_anomaly" and clip_name:
-                database.create_audio_analysis(ev_id)
+            if ev_type in {"audio_anomaly", "video_anomaly"}:
+                database.create_audio_analysis(ev_id, status="not_analyzed")
                 if self.audio_job_callback:
                     self.audio_job_callback(ev_id)
             

@@ -32,5 +32,5 @@ class DahuaEventParserTest(unittest.TestCase):
 
         self.assertEqual(save_event.call_args.kwargs["event_type"], "video_anomaly")
         self.assertNotIn("clip_filename", save_event.call_args.kwargs)
-        create_audio_analysis.assert_called_once_with(42)
+        create_audio_analysis.assert_called_once_with(42, status="not_analyzed")
         audio_job_callback.assert_called_once_with(42)

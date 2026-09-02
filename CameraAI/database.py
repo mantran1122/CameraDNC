@@ -32,7 +32,7 @@ def init_db():
         clip_duration_sec INTEGER DEFAULT 10
     );
     """)
-    
+
     # Table for aggregated daily summary
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS daily_summaries (
@@ -66,6 +66,16 @@ def init_db():
         analyzed_at TEXT,
         FOREIGN KEY(event_id) REFERENCES events(id)
     );
+    """)
+
+    # Repair legacy rows that were marked completed even though neither STT nor
+    # an AI conclusion was produced.
+    cursor.execute("""
+        UPDATE audio_analyses
+        SET status = 'no_speech_detected', ignored_reason = COALESCE(ignored_reason, 'empty_transcript')
+        WHERE status = 'completed'
+          AND (transcript IS NULL OR TRIM(transcript) = '')
+          AND (suggestion_json IS NULL OR TRIM(suggestion_json) = '')
     """)
     
     conn.commit()
@@ -166,7 +176,7 @@ def update_event_clip(event_id: int, clip_filename: str):
     conn.close()
 
 
-def create_audio_analysis(event_id: int) -> bool:
+def create_audio_analysis(event_id: int, status: str = "not_analyzed") -> bool:
     """Create the single pending audio-analysis record for an event.
 
     Repeated calls are safe: an existing result is never overwritten.
@@ -176,9 +186,9 @@ def create_audio_analysis(event_id: int) -> bool:
     cursor.execute(
         """
         INSERT OR IGNORE INTO audio_analyses (event_id, status, created_at)
-        VALUES (?, 'pending', ?)
+        VALUES (?, ?, ?)
         """,
-        (event_id, datetime.now().astimezone().isoformat(timespec="seconds")),
+        (event_id, status, datetime.now().astimezone().isoformat(timespec="seconds")),
     )
     created = cursor.rowcount == 1
     conn.commit()

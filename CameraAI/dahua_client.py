@@ -126,7 +126,7 @@ class DahuaNVRListener(threading.Thread):
             # The worker waits until the NVR has committed the post-event
             # buffer, then captures the full 10 seconds and reports the audio
             # result (including a missing audio track) to the dashboard.
-            database.create_audio_analysis(event_id)
+            database.create_audio_analysis(event_id, status="not_analyzed")
             if self.audio_job_callback:
                 self.audio_job_callback(event_id)
         

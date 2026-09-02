@@ -187,15 +187,18 @@ function renderAbnormalBehaviorOptions(options, selectedCodes) {
 function formatAudioStatus(analysis) {
     if (!analysis) return '';
     const labels = {
-        pending: 'Đang chờ clip',
-        waiting_for_post_buffer: 'Đang chờ clip',
-        downloading_clip: 'Đang tải clip',
+        not_analyzed: 'Chưa phân tích',
+        processing: 'Đang kiểm tra video',
+        video_missing: 'Không tìm thấy video evidence',
         extracting_audio: 'Đang tách âm thanh',
         transcribing: 'Đang phân tích âm thanh',
-        generating_suggestion: 'Đang tạo gợi ý',
+        analyzing: 'Đang tạo gợi ý AI',
+        no_audio_track: 'Video không có kênh âm thanh',
+        audio_too_quiet: 'Âm thanh quá nhỏ',
+        no_speech_detected: 'Không phát hiện giọng nói',
+        stt_failed: 'STT không thể hoàn tất',
+        transcribed: 'Đã có transcript, chưa có gợi ý AI',
         completed: 'Đã phân tích',
-        no_audio: 'Clip không có âm thanh',
-        failed: 'Không thể phân tích âm thanh',
     };
     return labels[analysis.status] || analysis.status;
 }
@@ -208,11 +211,15 @@ function setText(id, value, fallback = '-') {
 function renderAudioAnalysis(analysis) {
     const status = formatAudioStatus(analysis);
     setText('clip-audio-status', status, 'Chưa có dữ liệu');
-    const transcriptFallback = analysis?.status === 'no_audio'
-        ? 'Clip không có track âm thanh nên không thể phân tích.'
-        : analysis?.status === 'failed'
-            ? 'Không thể phân tích âm thanh. Xem thông báo lỗi bên dưới hoặc thử lại.'
-            : 'Chưa có transcript.';
+    const transcriptFallbacks = {
+        not_analyzed: 'Chưa chạy phân tích. Bấm nút để bắt đầu.',
+        video_missing: 'Không tìm thấy video evidence của cảnh báo.',
+        no_audio_track: 'Video không chứa kênh âm thanh nên không thể tạo transcript.',
+        audio_too_quiet: 'Có kênh âm thanh nhưng âm lượng quá nhỏ hoặc gần như im lặng.',
+        no_speech_detected: 'Có âm thanh nhưng không phát hiện lời nói có thể nhận dạng.',
+        stt_failed: 'Speech-to-text không thể hoàn tất. Xem lỗi bên dưới.',
+    };
+    const transcriptFallback = transcriptFallbacks[analysis?.status] || 'Chưa có transcript.';
     setText('clip-audio-transcript', analysis?.transcript, transcriptFallback);
     const suggestion = analysis?.suggestion;
     setText('clip-audio-summary', suggestion?.summary, 'Chưa có gợi ý.');
@@ -230,7 +237,7 @@ function renderAudioAnalysis(analysis) {
     });
     if (!list.children.length) {
         const row = document.createElement('li');
-        row.textContent = 'Chưa có evidence suy luận.';
+        row.textContent = analysis?.status === 'completed' ? 'Không có evidence.' : 'Chưa có evidence vì phân tích chưa hoàn tất.';
         list.appendChild(row);
     }
 }
@@ -242,9 +249,9 @@ function renderAudioAnalysisAction(ev) {
     const canAnalyse = isAnomaly && Boolean(ev?.clip_filename);
     const status = ev?.audio_analysis?.status;
     button.dataset.eventId = ev?.id || '';
-    button.hidden = !canAnalyse;
-    button.disabled = !canAnalyse || ['pending', 'waiting_for_post_buffer', 'downloading_clip', 'extracting_audio', 'transcribing', 'generating_suggestion', 'completed', 'no_audio'].includes(status);
-    button.textContent = status === 'failed' ? '↻ Thử lại phân tích' : '🎙 Phân tích giọng nói';
+    button.hidden = !isAnomaly;
+    button.disabled = !canAnalyse || ['processing', 'extracting_audio', 'transcribing', 'analyzing', 'completed', 'no_audio_track', 'audio_too_quiet', 'no_speech_detected'].includes(status);
+    button.textContent = ['video_missing', 'stt_failed', 'transcribed'].includes(status) ? '↻ Thử lại phân tích' : '🎙 Phân tích giọng nói';
 }
 
 async function requestAudioAnalysis() {

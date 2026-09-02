@@ -18,6 +18,7 @@ import database
 import summary_engine
 import video_clipper
 from audio_analysis_worker import AudioAnalysisWorker
+from clip_capture_worker import ClipCaptureWorker
 from dahua_client import DahuaNVRListener
 from simulator import NVRDataSimulator
 
@@ -65,6 +66,7 @@ manager = ConnectionManager()
 nvr_listener = None
 simulator_thread = None
 audio_analysis_worker = None
+clip_capture_worker = None
 # The FastAPI/Uvicorn event loop belongs to the server thread. Listener and
 # simulator threads use this stored reference to schedule WebSocket broadcasts.
 server_event_loop: Optional[asyncio.AbstractEventLoop] = None
@@ -81,36 +83,34 @@ def broadcast_event_sync(event_obj: dict):
         print(f"[WebSocket Broadcast Error] {e}")
 
 def restart_listener_service():
-    global nvr_listener, simulator_thread, audio_analysis_worker
+    global nvr_listener, simulator_thread, audio_analysis_worker, clip_capture_worker
     if nvr_listener:
         nvr_listener.stop()
     if simulator_thread:
         simulator_thread.stop()
     if audio_analysis_worker:
         audio_analysis_worker.stop()
+    if clip_capture_worker:
+        clip_capture_worker.stop()
 
     nvr_listener = None
     simulator_thread = None
     audio_analysis_worker = AudioAnalysisWorker(on_updated=broadcast_audio_analysis_update)
     audio_analysis_worker.start()
+    clip_capture_worker = ClipCaptureWorker(on_updated=broadcast_audio_analysis_update)
+    clip_capture_worker.start()
 
     # Demo data must never be created while connected to a production NVR.
     if config.DEMO_MODE:
         simulator_thread = NVRDataSimulator(
             broadcast_callback=broadcast_event_sync,
-            audio_job_callback=audio_analysis_worker.enqueue,
+            audio_job_callback=clip_capture_worker.enqueue,
         )
         simulator_thread.start()
 
-    # Process alarm clips that were saved before this feature was enabled.
-    # The cap avoids a restart unexpectedly creating an unbounded backlog.
-    for event_id in database.get_unanalyzed_audio_event_ids(config.AUDIO_ANALYSIS_BACKFILL_LIMIT):
-        database.create_audio_analysis(event_id)
-        audio_analysis_worker.enqueue(event_id)
-
     nvr_listener = DahuaNVRListener(
         broadcast_callback=broadcast_event_sync,
-        audio_job_callback=audio_analysis_worker.enqueue,
+        audio_job_callback=clip_capture_worker.enqueue,
     )
     nvr_listener.start()
 
@@ -124,13 +124,15 @@ async def startup_event():
 
 @app.on_event("shutdown")
 async def shutdown_event():
-    global nvr_listener, simulator_thread, audio_analysis_worker, server_event_loop
+    global nvr_listener, simulator_thread, audio_analysis_worker, clip_capture_worker, server_event_loop
     if nvr_listener:
         nvr_listener.stop()
     if simulator_thread:
         simulator_thread.stop()
     if audio_analysis_worker:
         audio_analysis_worker.stop()
+    if clip_capture_worker:
+        clip_capture_worker.stop()
     server_event_loop = None
 
 
@@ -180,22 +182,26 @@ async def request_audio_analysis(event_id: int):
     if event["event_type"] not in {"audio_anomaly", "video_anomaly"}:
         return JSONResponse(status_code=400, content={"error": "Chỉ sự kiện bất thường mới có thể phân tích âm thanh."})
     if not event.get("clip_filename"):
-        return JSONResponse(status_code=409, content={"error": "Sự kiện này chưa có clip để phân tích."})
+        database.create_audio_analysis(event_id, status="video_missing")
+        database.update_audio_analysis(event_id, status="video_missing", error_message="Không tìm thấy video evidence của cảnh báo.")
+        broadcast_audio_analysis_update(event_id)
+        return JSONResponse(status_code=409, content={"error": "Không tìm thấy video evidence của cảnh báo."})
     clip_path = config.CLIPS_DIR / os.path.basename(str(event["clip_filename"]))
     if not clip_path.is_file():
-        return JSONResponse(status_code=409, content={"error": "Không tìm thấy file clip đang xem lại để phân tích."})
+        database.update_audio_analysis(event_id, status="video_missing", error_message="File video evidence không còn trên máy chủ.")
+        broadcast_audio_analysis_update(event_id)
+        return JSONResponse(status_code=409, content={"error": "Không tìm thấy file video evidence."})
     if audio_analysis_worker is None:
         return JSONResponse(status_code=503, content={"error": "Audio worker chưa sẵn sàng."})
 
     analysis = database.get_audio_analysis(event_id)
-    active_statuses = {"pending", "waiting_for_post_buffer", "downloading_clip", "extracting_audio", "transcribing", "generating_suggestion"}
-    if analysis and analysis["status"] in active_statuses | {"completed", "no_audio"}:
+    active_statuses = {"processing", "extracting_audio", "transcribing", "analyzing"}
+    if analysis and analysis["status"] in active_statuses | {"completed"}:
         return {"queued": False, "audio_analysis": analysis}
 
     if analysis is None:
-        database.create_audio_analysis(event_id)
-    else:
-        database.update_audio_analysis(event_id, status="pending", error_message=None)
+        database.create_audio_analysis(event_id, status="not_analyzed")
+    database.update_audio_analysis(event_id, status="processing", error_message=None)
     analysis = database.get_audio_analysis(event_id)
     broadcast_audio_analysis_update(event_id)
     audio_analysis_worker.enqueue(event_id)
