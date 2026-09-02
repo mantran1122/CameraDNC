@@ -98,22 +98,23 @@ class DahuaNVRListener(threading.Thread):
         description = f"Phát hiện sự kiện {code} tại Camera Ch {channel:02d}"
         audio_db = None
         
-        if code in ["AudioAnomaly", "SoundDetection", "FightSound"]:
+        is_selected_abnormal = code in config.ABNORMAL_EVENT_CODES
+        if is_selected_abnormal and code in config.AUDIO_EVENT_CODES:
             event_type = "audio_anomaly"
             severity = "high"
             audio_db = float(event_data.get("AudioValue", 85.0))
-            description = f"BẤT THƯỜNG ÂM THANH: Phát hiện tiếng la gào/tiếng động lớn ({audio_db} dB) tại Cam {channel:02d}"
-        elif code in ["Intrusion", "CrossLine", "Fight"]:
+            description = f"BẤT THƯỜNG ĐÃ CHỌN: {code} ({audio_db} dB) tại Cam {channel:02d}"
+        elif is_selected_abnormal:
             event_type = "video_anomaly"
             severity = "high"
-            description = f"BẤT THƯỜNG VIDEO: Vi phạm vùng an ninh / Đột nhập ({code}) tại Cam {channel:02d}"
+            description = f"BẤT THƯỜNG ĐÃ CHỌN TỪ METADATA: {code} tại Cam {channel:02d}"
         elif code in ["FaceDetection", "HumanTrait"]:
             description = f"Metadata Người: Phát hiện đối tượng tại Cam {channel:02d}"
         elif code in ["VehicleTrait"]:
             description = f"Metadata Phương tiện: Phát hiện xe tại Cam {channel:02d}"
 
         clip_name = None
-        if event_type == "video_anomaly":
+        if event_type in {"audio_anomaly", "video_anomaly"}:
             clip_filename = f"clip_ch{channel}_{now.strftime('%Y%m%d_%H%M%S')}.mp4"
             clip_name = video_clipper.clip_event_video(
                 channel=channel,

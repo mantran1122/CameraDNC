@@ -22,7 +22,10 @@ DEFAULT_CONFIG = {
     "active_channels": list(range(1, 33)),  # 1 to 32
     "demo_mode": False,
     "pre_buffer_sec": 5,
-    "post_buffer_sec": 5
+    "post_buffer_sec": 5,
+    # Metadata codes selected here are treated as abnormal behaviour. A 10s
+    # replay clip is saved for each selected event.
+    "abnormal_event_codes": ["Intrusion", "CrossLine", "Fight", "AudioAnomaly", "SoundDetection"]
 }
 
 def load_config():
@@ -52,6 +55,7 @@ NVR_USER = _current_cfg.get("nvr_user", "admin")
 NVR_PASSWORD = _current_cfg.get("nvr_password", "admin123")
 ACTIVE_CHANNELS = _current_cfg.get("active_channels", list(range(1, 33)))
 DEMO_MODE = _current_cfg.get("demo_mode", False)
+ABNORMAL_EVENT_CODES = _current_cfg.get("abnormal_event_codes", DEFAULT_CONFIG["abnormal_event_codes"])
 PRE_BUFFER_SEC = _current_cfg.get("pre_buffer_sec", 5)
 POST_BUFFER_SEC = _current_cfg.get("post_buffer_sec", 5)
 CLIP_DURATION_SEC = PRE_BUFFER_SEC + POST_BUFFER_SEC
@@ -98,8 +102,23 @@ EVENT_CODES = [
     "Fight"
 ]
 
+# Labels are kept next to the Dahua event-code contract so the dashboard and
+# API use the same metadata behaviours.
+ABNORMAL_BEHAVIOR_OPTIONS = [
+    {"code": "Intrusion", "label": "Đột nhập vùng cấm"},
+    {"code": "CrossLine", "label": "Vượt hàng rào / đường cảnh báo"},
+    {"code": "Fight", "label": "Đánh nhau"},
+    {"code": "VideoMotion", "label": "Chuyển động"},
+    {"code": "AudioAnomaly", "label": "Âm thanh bất thường"},
+    {"code": "SoundDetection", "label": "Phát hiện tiếng động"},
+    {"code": "FaceDetection", "label": "Phát hiện khuôn mặt"},
+    {"code": "HumanTrait", "label": "Phát hiện người"},
+    {"code": "VehicleTrait", "label": "Phát hiện phương tiện"},
+]
+AUDIO_EVENT_CODES = {"AudioAnomaly", "SoundDetection", "FightSound"}
+
 def update_global_config(new_cfg: dict):
-    global NVR_HOST, USE_HTTPS, NVR_PORT, RTSP_PORT, NVR_USER, NVR_PASSWORD, ACTIVE_CHANNELS, DEMO_MODE
+    global NVR_HOST, USE_HTTPS, NVR_PORT, RTSP_PORT, NVR_USER, NVR_PASSWORD, ACTIVE_CHANNELS, DEMO_MODE, ABNORMAL_EVENT_CODES
     save_config(new_cfg)
     NVR_HOST = new_cfg.get("nvr_host", NVR_HOST)
     USE_HTTPS = new_cfg.get("use_https", USE_HTTPS)
@@ -109,3 +128,4 @@ def update_global_config(new_cfg: dict):
     NVR_PASSWORD = new_cfg.get("nvr_password", NVR_PASSWORD)
     ACTIVE_CHANNELS = new_cfg.get("active_channels", ACTIVE_CHANNELS)
     DEMO_MODE = new_cfg.get("demo_mode", DEMO_MODE)
+    ABNORMAL_EVENT_CODES = new_cfg.get("abnormal_event_codes", ABNORMAL_EVENT_CODES)

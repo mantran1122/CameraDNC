@@ -254,6 +254,7 @@ class NVRConfigModel(BaseModel):
     nvr_password: str
     active_channels: List[int] = list(range(1, 33))
     demo_mode: bool = False
+    abnormal_event_codes: List[str] = []
 
 @app.get("/api/config/nvr")
 async def get_nvr_config():
@@ -265,6 +266,8 @@ async def get_nvr_config():
         "nvr_user": config.NVR_USER,
         "active_channels": config.ACTIVE_CHANNELS,
         "demo_mode": config.DEMO_MODE,
+        "abnormal_event_codes": config.ABNORMAL_EVENT_CODES,
+        "abnormal_behavior_options": config.ABNORMAL_BEHAVIOR_OPTIONS,
         "ffmpeg_available": True
     }
 
@@ -332,7 +335,17 @@ async def test_nvr_connection(cfg: NVRConfigModel):
 
 @app.post("/api/config/nvr")
 async def update_nvr_config(cfg: NVRConfigModel):
+    allowed_codes = {item["code"] for item in config.ABNORMAL_BEHAVIOR_OPTIONS}
+    unsupported_codes = sorted(set(cfg.abnormal_event_codes) - allowed_codes)
+    if unsupported_codes:
+        return JSONResponse(
+            status_code=422,
+            content={"error": f"Mã hành vi metadata không hỗ trợ: {', '.join(unsupported_codes)}"},
+        )
     cfg_dict = cfg.dict()
+    # Keep the persisted configuration predictable if a client submits the
+    # same checkbox value more than once.
+    cfg_dict["abnormal_event_codes"] = list(dict.fromkeys(cfg.abnormal_event_codes))
     config.update_global_config(cfg_dict)
     restart_listener_service()
     return {"status": "success", "message": f"Cấu hình kết nối NVR ({cfg.nvr_host}) đã được cập nhật thành công!"}

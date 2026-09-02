@@ -57,6 +57,7 @@ async function loadNVRConfigUI() {
         document.getElementById('cfg-rtsp').value = data.rtsp_port || 554;
         document.getElementById('cfg-user').value = data.nvr_user || 'admin';
         document.getElementById('cfg-demo').checked = Boolean(data.demo_mode);
+        renderAbnormalBehaviorOptions(data.abnormal_behavior_options || [], data.abnormal_event_codes || []);
 
         // Update Header Bar
         document.getElementById('bar-nvr-host').innerText = data.nvr_host || '192.168.1.108';
@@ -163,6 +164,24 @@ function createEventCard(ev) {
         </div>
     `;
     return card;
+}
+
+function renderAbnormalBehaviorOptions(options, selectedCodes) {
+    const grid = document.getElementById('abnormal-behavior-grid');
+    if (!grid) return;
+    const selected = new Set(selectedCodes);
+    grid.replaceChildren();
+    options.forEach(({code, label}) => {
+        const option = document.createElement('label');
+        option.className = 'abnormal-behavior-option';
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.className = 'abnormal-behavior-checkbox';
+        checkbox.value = code;
+        checkbox.checked = selected.has(code);
+        option.append(checkbox, document.createTextNode(` ${label}`));
+        grid.appendChild(option);
+    });
 }
 
 function formatAudioStatus(analysis) {
@@ -334,6 +353,7 @@ function testActiveConnection() {
 
 function getFormPayload() {
     const activeCh = Array.from(document.querySelectorAll('.ch-checkbox:checked')).map(b => parseInt(b.value));
+    const abnormalEventCodes = Array.from(document.querySelectorAll('.abnormal-behavior-checkbox:checked')).map(b => b.value);
     return {
         nvr_host: document.getElementById('cfg-host').value.trim(),
         use_https: document.getElementById('cfg-https').value === 'true',
@@ -342,7 +362,8 @@ function getFormPayload() {
         nvr_user: document.getElementById('cfg-user').value.trim(),
         nvr_password: document.getElementById('cfg-pass').value,
         active_channels: activeCh,
-        demo_mode: document.getElementById('cfg-demo').checked
+        demo_mode: document.getElementById('cfg-demo').checked,
+        abnormal_event_codes: abnormalEventCodes
     };
 }
 

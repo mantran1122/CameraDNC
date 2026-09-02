@@ -518,6 +518,14 @@ body {
 .audio-analysis-error { margin-top: 0.75rem; color: #fca5a5; }
 @media (max-width: 640px) { .audio-analysis-grid, .clip-hud-info { grid-template-columns: 1fr; } }
 
+.abnormal-behavior-config { background: rgba(239, 68, 68, 0.08); border: 1px solid rgba(239, 68, 68, 0.28); border-radius: 8px; padding: 0.9rem 1rem; }
+.config-section-title { color: #fecaca; font-size: 0.875rem; font-weight: 700; }
+.config-section-note { color: var(--text-muted); font-size: 0.75rem; line-height: 1.4; margin-top: 0.25rem; }
+.abnormal-behavior-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.55rem 1rem; margin-top: 0.8rem; }
+.abnormal-behavior-option { color: #e5e7eb; cursor: pointer; font-size: 0.825rem; }
+.abnormal-behavior-option input { accent-color: var(--accent-red); margin-right: 0.25rem; }
+@media (max-width: 640px) { .abnormal-behavior-grid { grid-template-columns: 1fr; } }
+
 /* Tabs styling */
 .tabs-container {
     display: flex;

@@ -20,3 +20,15 @@ class DahuaEventParserTest(unittest.TestCase):
         self.assertEqual(save_event.call_args.kwargs["channel"], 5)
         self.assertEqual(save_event.call_args.kwargs["metadata_dict"]["action"], "Start")
 
+    def test_selected_metadata_behavior_is_saved_as_anomaly_with_a_clip(self):
+        listener = dahua_client.DahuaNVRListener()
+        with patch.object(dahua_client.config, "ACTIVE_CHANNELS", [1]), \
+             patch.object(dahua_client.config, "ABNORMAL_EVENT_CODES", ["HumanTrait"]), \
+             patch.object(dahua_client.database, "save_event", return_value=42) as save_event, \
+             patch.object(dahua_client.database, "get_event_by_id", return_value=None), \
+             patch.object(dahua_client.video_clipper, "clip_event_video", return_value="clip.mp4") as clip_event_video:
+            listener.process_event_block("Code=HumanTrait;action=Start;index=0")
+
+        self.assertEqual(save_event.call_args.kwargs["event_type"], "video_anomaly")
+        self.assertEqual(save_event.call_args.kwargs["clip_filename"], "clip.mp4")
+        clip_event_video.assert_called_once()
