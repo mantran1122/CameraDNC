@@ -199,6 +199,19 @@ python CameraAI\migrate_video_storage.py --apply
 
 Manifest được ghi vào `CameraAI/storage/migrations/`. Các file không liên kết được với event sẽ có trạng thái `needs_review`, không bị tự động đưa vào camera bất kỳ.
 
+### Chuyển kho clip sang NAS
+
+`CAMERAAI_CLIPS_DIR` là biến môi trường cho thư mục gốc clip. Database vẫn ở `CameraAI/storage`; các đường dẫn clip trong database là tương đối nên không phải đổi lại khi chuyển kho.
+
+Ví dụ trên Windows (chỉ sau khi đã copy và kiểm tra dữ liệu NAS):
+
+```powershell
+$env:CAMERAAI_CLIPS_DIR = "\\nas01\camera-ai\clips"
+python CameraAI\main.py
+```
+
+Tài khoản chạy CameraAI phải có quyền đọc/ghi tại NAS. Không xóa bản cũ trước khi UI mở được clip từ NAS và số lượng/checksum đã được đối soát.
+
 ## 10. Các quyết định cần chốt trước khi code
 
 1. NAS là SMB/NFS hay MinIO/S3-compatible? Dung lượng và đường dẫn/prefix được cấp?

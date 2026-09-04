@@ -4,7 +4,10 @@ from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent
 STORAGE_DIR = BASE_DIR / "storage"
-CLIPS_DIR = STORAGE_DIR / "clips"
+# Keep database/config local; video evidence can be redirected to a mounted
+# NAS share without changing code.  The value must be writable by the account
+# that runs CameraAI (for example: \\nas01\\camera-ai\\clips).
+CLIPS_DIR = Path(os.getenv("CAMERAAI_CLIPS_DIR", str(STORAGE_DIR / "clips"))).expanduser()
 CONFIG_FILE = STORAGE_DIR / "nvr_config.json"
 
 # Ensure directories exist
