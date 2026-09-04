@@ -7,3 +7,4 @@ opencv-python-headless>=4.8.0.74
 imageio>=2.30.0
 imageio-ffmpeg>=0.5.0
 psycopg[binary]>=3.2.0
+pywebview>=5.3.0
