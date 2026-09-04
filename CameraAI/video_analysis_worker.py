@@ -1,9 +1,13 @@
 """Manual background analysis of representative frames from an event clip."""
 
+import json
+import math
 import queue
 import threading
 import time
+import zipfile
 from datetime import datetime, timedelta
+from io import BytesIO
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -75,8 +79,8 @@ class VideoAnalysisWorker:
             return
 
         self._set_status(event_id, "extracting_frames", error_message=None)
-        frames = self._extract_frames(clip_path, config.VIDEO_ANALYSIS_SAMPLE_OFFSETS)
-        if not frames:
+        sequences = self._extract_adaptive_sequences(clip_path)
+        if not sequences:
             self._set_status(event_id, "failed", error_message="Không đọc được frame nào từ video evidence.")
             return
 
@@ -91,14 +95,18 @@ class VideoAnalysisWorker:
             self._set_status(event_id, "failed", error_message=f"Cosmos chưa sẵn sàng: {health_data.get('status', health.status_code)}")
             return
 
-        self._set_status(event_id, "analyzing_frames")
+        self._set_status(event_id, "analyzing_sequences")
         event_time = datetime.strptime(event["timestamp"], "%Y-%m-%d %H:%M:%S")
         results = []
-        for offset, jpeg_bytes in frames:
-            captured_at = (event_time - timedelta(seconds=config.PRE_BUFFER_SEC) + timedelta(seconds=offset)).astimezone()
-            payload = self._analyze_frame(jpeg_bytes, event, captured_at)
+        for sequence in sequences:
+            window_start = sequence["start_seconds"]
+            window_end = sequence["end_seconds"]
+            captured_at = (event_time - timedelta(seconds=config.PRE_BUFFER_SEC) + timedelta(seconds=window_start)).astimezone()
+            payload = self._analyze_sequence(sequence["frames"], event, captured_at, window_start, window_end)
             results.append({
-                "offset_seconds": offset,
+                "window_start_seconds": window_start,
+                "window_end_seconds": window_end,
+                "frame_offsets_seconds": [offset for offset, _ in sequence["frames"]],
                 "captured_at": captured_at.isoformat(timespec="seconds"),
                 "inference_ms": payload.get("inference_ms"),
                 "result": payload["result"],
@@ -117,25 +125,112 @@ class VideoAnalysisWorker:
         )
 
     @staticmethod
-    def _extract_frames(clip_path: Path, offsets) -> list[tuple[float, bytes]]:
+    def _extract_adaptive_sequences(clip_path: Path) -> list[dict]:
+        """Split a clip into bounded temporal windows and retain diverse frames.
+
+        We keep evenly spaced context frames plus frames with the largest visual
+        change.  This is more useful for fights/falls than fixed offsets and
+        prevents a long playback recording from overflowing the VLM context.
+        """
         capture = cv2.VideoCapture(str(clip_path))
-        frames = []
         try:
-            for raw_offset in offsets:
-                offset = max(0.0, float(raw_offset))
-                capture.set(cv2.CAP_PROP_POS_MSEC, offset * 1000)
-                ok, frame = capture.read()
-                if not ok:
-                    continue
-                encoded, buffer = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 88])
-                if encoded:
-                    frames.append((offset, buffer.tobytes()))
+            fps = float(capture.get(cv2.CAP_PROP_FPS) or 0)
+            frame_count = float(capture.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+            duration = frame_count / fps if fps > 0 and frame_count > 0 else 0.0
+            if duration <= 0:
+                return []
+            windows = []
+            start = 0.0
+            while start < duration:
+                end = min(duration, start + config.VIDEO_ANALYSIS_WINDOW_SECONDS)
+                frames = VideoAnalysisWorker._select_window_frames(
+                    capture, start, end, config.VIDEO_ANALYSIS_MAX_FRAMES_PER_WINDOW
+                )
+                if frames:
+                    windows.append({"start_seconds": round(start, 3), "end_seconds": round(end, 3), "frames": frames})
+                start = end
+            return windows
         finally:
             capture.release()
+
+    @staticmethod
+    def _select_window_frames(capture, start: float, end: float, max_frames: int) -> list[tuple[float, bytes]]:
+        duration = max(0.01, end - start)
+        candidate_count = min(40, max(max_frames * 3, int(math.ceil(duration * 2))))
+        candidates = []
+        previous_gray = None
+        for index in range(candidate_count):
+            offset = start + (duration * index / max(1, candidate_count - 1))
+            # OpenCV may seek one frame beyond EOF; clamp to a valid timestamp.
+            capture.set(cv2.CAP_PROP_POS_MSEC, max(0.0, offset) * 1000)
+            ok, frame = capture.read()
+            if not ok or frame is None:
+                continue
+            preview = cv2.resize(frame, (160, 90), interpolation=cv2.INTER_AREA)
+            gray = cv2.cvtColor(preview, cv2.COLOR_BGR2GRAY)
+            motion = 0.0 if previous_gray is None else float(cv2.absdiff(gray, previous_gray).mean())
+            previous_gray = gray
+            candidates.append((offset, frame, motion))
+        if not candidates:
+            return []
+
+        # First/last and evenly-spaced moments establish context; high-motion
+        # candidates fill the remaining slots so short physical interactions are
+        # less likely to be missed.
+        selected_indexes = {0, len(candidates) - 1}
+        base_count = min(4, max_frames)
+        for index in range(base_count):
+            selected_indexes.add(round(index * (len(candidates) - 1) / max(1, base_count - 1)))
+        for index, _candidate in sorted(enumerate(candidates), key=lambda item: item[1][2], reverse=True):
+            if len(selected_indexes) >= max_frames:
+                break
+            selected_indexes.add(index)
+
+        frames = []
+        for index in sorted(selected_indexes):
+            offset, frame, _motion = candidates[index]
+            encoded, buffer = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 90])
+            if encoded:
+                frames.append((round(offset, 3), buffer.tobytes()))
         return frames
 
     @staticmethod
+    def _analyze_sequence(
+        frames: list[tuple[float, bytes]], event: dict, captured_at: datetime, window_start: float, window_end: float
+    ) -> dict:
+        sequence_url = config.COSMOS_VIDEO_URL.rsplit("/", 1)[0] + "/analyze-sequence"
+        archive = BytesIO()
+        with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as bundle:
+            for index, (offset, jpeg_bytes) in enumerate(frames):
+                bundle.writestr(f"{index:02d}_{offset:08.3f}.jpg", jpeg_bytes)
+        headers = {
+            "Content-Type": "application/zip",
+            "X-Cosmos-Device-Id": str(config.NVR_HOST),
+            "X-Cosmos-Channel": str(event["channel"]),
+            "X-Cosmos-Captured-At": captured_at.isoformat(timespec="seconds"),
+            "X-Cosmos-Analysis-Source": "event_clip",
+            "X-Cosmos-Prompt-Profile": config.COSMOS_PROMPT_PROFILE,
+            "X-Cosmos-Window-Start": str(round(window_start, 3)),
+            "X-Cosmos-Window-End": str(round(window_end, 3)),
+            "X-Cosmos-Frame-Offsets": json.dumps([offset for offset, _ in frames]),
+        }
+        response = None
+        for attempt in range(3):
+            response = requests.post(sequence_url, data=archive.getvalue(), headers=headers, timeout=180)
+            if response.status_code != 429:
+                break
+            time.sleep(attempt + 1)
+        if response is None or not response.ok:
+            code = response.status_code if response is not None else "unknown"
+            raise RuntimeError(f"Cosmos sequence analysis failed: HTTP {code}")
+        payload = response.json()
+        if payload.get("status") != "ok" or not isinstance(payload.get("result"), dict):
+            raise RuntimeError(payload.get("detail", "Cosmos trả kết quả chuỗi video không hợp lệ."))
+        return payload
+
+    @staticmethod
     def _analyze_frame(jpeg_bytes: bytes, event: dict, captured_at: datetime) -> dict:
+        """Legacy single-frame helper retained for integrations outside this worker."""
         headers = {
             "Content-Type": "application/octet-stream",
             "X-Cosmos-Device-Id": str(config.NVR_HOST),
@@ -144,15 +239,9 @@ class VideoAnalysisWorker:
             "X-Cosmos-Analysis-Source": "event_clip",
             "X-Cosmos-Prompt-Profile": config.COSMOS_PROMPT_PROFILE,
         }
-        response = None
-        for attempt in range(3):
-            response = requests.post(config.COSMOS_VIDEO_URL, data=jpeg_bytes, headers=headers, timeout=90)
-            if response.status_code != 429:
-                break
-            time.sleep(attempt + 1)
-        if response is None or not response.ok:
-            code = response.status_code if response is not None else "unknown"
-            raise RuntimeError(f"Cosmos video analysis failed: HTTP {code}")
+        response = requests.post(config.COSMOS_VIDEO_URL, data=jpeg_bytes, headers=headers, timeout=90)
+        if not response.ok:
+            raise RuntimeError(f"Cosmos video analysis failed: HTTP {response.status_code}")
         payload = response.json()
         if payload.get("status") != "ok" or not isinstance(payload.get("result"), dict):
             raise RuntimeError(payload.get("detail", "Cosmos trả kết quả video không hợp lệ."))
@@ -169,8 +258,13 @@ class VideoAnalysisWorker:
             if _RISK_ORDER.get(risk, 0) > _RISK_ORDER[risk_level]:
                 risk_level = risk
             summary = " ".join(str(result.get("summary", "")).split())
-            if summary and summary not in summaries:
-                summaries.append(summary)
+            if summary:
+                start = frame.get("window_start_seconds")
+                end = frame.get("window_end_seconds")
+                prefix = f"[{start:.1f}s–{end:.1f}s] " if isinstance(start, (float, int)) and isinstance(end, (float, int)) else ""
+                rendered = prefix + summary
+                if rendered not in summaries:
+                    summaries.append(rendered)
             for item in result.get("events", []):
                 if not isinstance(item, dict):
                     continue

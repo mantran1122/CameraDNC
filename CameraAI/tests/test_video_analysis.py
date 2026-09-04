@@ -62,18 +62,22 @@ class VideoAnalysisTest(unittest.TestCase):
         self.assertEqual(result["events"], [{"label": "khoi", "count": 1}, {"label": "nguoi", "count": 3}])
         self.assertIn("Có hai người", result["summary"])
 
-    def test_worker_analyzes_representative_frames(self):
+    def test_worker_analyzes_adaptive_sequences(self):
         event_id = self._event("reviewable.mp4")
         (config.CLIPS_DIR / "reviewable.mp4").write_bytes(b"placeholder")
         worker = video_analysis_worker.VideoAnalysisWorker()
         health = Mock(ok=True, status_code=200)
         health.json.return_value = {"status": "ready", "video_model": "nvidia/Cosmos-Reason2-2B"}
-        frame_results = [
+        sequence_results = [
             {"status": "ok", "inference_ms": 100, "result": {"summary": "Khung cảnh bình thường.", "risk_level": "none", "events": []}},
             {"status": "ok", "inference_ms": 120, "result": {"summary": "Có một người.", "risk_level": "low", "events": [{"label": "nguoi", "count": 1}]}},
         ]
-        with patch.object(worker, "_extract_frames", return_value=[(1.0, b"one"), (5.0, b"two")]), \
-             patch.object(worker, "_analyze_frame", side_effect=frame_results), \
+        sequences = [
+            {"start_seconds": 0.0, "end_seconds": 10.0, "frames": [(0.0, b"one"), (5.0, b"two")]},
+            {"start_seconds": 10.0, "end_seconds": 20.0, "frames": [(10.0, b"three"), (15.0, b"four")]},
+        ]
+        with patch.object(worker, "_extract_adaptive_sequences", return_value=sequences), \
+             patch.object(worker, "_analyze_sequence", side_effect=sequence_results), \
              patch.object(video_analysis_worker.requests, "get", return_value=health):
             worker._process(event_id)
 
@@ -81,6 +85,7 @@ class VideoAnalysisTest(unittest.TestCase):
         self.assertEqual(analysis["status"], "completed")
         self.assertEqual(analysis["risk_level"], "low")
         self.assertEqual(len(analysis["frames"]), 2)
+        self.assertEqual(analysis["frames"][1]["window_start_seconds"], 10.0)
         self.assertEqual(analysis["video_model"], "nvidia/Cosmos-Reason2-2B")
 
     def test_missing_clip_is_terminal(self):

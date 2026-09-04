@@ -21,6 +21,7 @@ import tempfile
 import threading
 import time
 import unicodedata
+import zipfile
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -501,14 +502,26 @@ def _vietnamese_admissions_summary(risk_level: str) -> str:
     return risk_text
 
 
-def _build_prompt_text(image: Image.Image, detector_context: str = "", prompt_profile: str | None = None) -> str:
-    """Tạo prompt string theo chat template nếu processor hỗ trợ."""
+def _build_prompt_text(
+    images: list[Image.Image], detector_context: str = "", prompt_profile: str | None = None,
+    sequence_context: str = "",
+) -> str:
+    """Build one prompt for an ordered still image or an ordered frame sequence."""
     prompt = _load_live_prompt(prompt_profile)
+    if len(images) > 1:
+        prompt = prompt.replace(
+            "You receive a single camera frame.",
+            "You receive an ordered sequence of camera frames from one short recorded-video window.",
+        ).replace(
+            "This is one still frame. Do not claim movement, entry/exit, duration, intent, or change over time unless temporal evidence is explicitly supplied.",
+            "Compare the ordered frames. You may report a change, movement, fall, physical aggression, entry/exit, or an object left behind only when it is visibly supported by more than one frame. If evidence is unclear, say so rather than guessing.",
+        )
+        prompt += "\n\n" + sequence_context
     messages = [
         {
             "role": "user",
             "content": [
-                {"type": "image", "image": image},
+                *[{"type": "image", "image": image} for image in images],
                 {"type": "text", "text": prompt + detector_context},
             ],
         }
@@ -592,12 +605,15 @@ def _extract_and_parse_json(output_text: str) -> dict:
     return parsed
 
 
-def _run_inference(image: Image.Image, detector_context: str = "", prompt_profile: str | None = None) -> str:
+def _run_inference(
+    images: list[Image.Image], detector_context: str = "", prompt_profile: str | None = None,
+    sequence_context: str = "",
+) -> str:
     """Chạy inference, trả về chuỗi text từ model."""
-    prompt_text = _build_prompt_text(image, detector_context, prompt_profile)
+    prompt_text = _build_prompt_text(images, detector_context, prompt_profile, sequence_context)
     request = {
         "prompt": prompt_text,
-        "multi_modal_data": {"image": [image]},
+        "multi_modal_data": {"image": images},
     }
     outputs = _model.generate([request], _sampling_params)
     output_text = outputs[0].outputs[0].text if outputs and outputs[0].outputs else ""
@@ -716,7 +732,7 @@ def analyze(
                 logger.warning("Uniform detector unavailable: %s", exc)
 
         try:
-            result_text = _run_inference(image, detector_context, active_prompt_profile)
+            result_text = _run_inference([image], detector_context, active_prompt_profile)
         except Exception as exc:
             logger.error("Inference error: %s", exc)
             return JSONResponse(
@@ -783,6 +799,82 @@ def analyze(
             "analysis_source": x_cosmos_analysis_source or "live_frame",
         }
 
+    finally:
+        _inference_lock.release()
+
+
+@app.post("/analyze-sequence")
+def analyze_sequence(
+    body: bytes = Body(..., media_type="application/zip"),
+    x_cosmos_prompt_profile: str | None = Header(default=None),
+    x_cosmos_window_start: str | None = Header(default=None),
+    x_cosmos_window_end: str | None = Header(default=None),
+    x_cosmos_frame_offsets: str | None = Header(default=None),
+    x_cosmos_analysis_source: str | None = Header(default=None),
+):
+    """Analyze a bounded, ordered set of JPEG frames packaged as a ZIP archive.
+
+    This endpoint is deliberately separate from `/analyze`: live-camera traffic
+    remains low-latency single-frame inference, while playback/test clips can
+    supply temporal evidence without treating an entire long recording as one
+    huge VLM request.
+    """
+    status, _detail = _get_status()
+    if status != "ready":
+        return JSONResponse({"status": "error", "detail": f"service not ready: {status}"}, status_code=503)
+    if not _inference_lock.acquire(blocking=False):
+        return JSONResponse({"status": "error", "detail": "busy"}, status_code=429)
+
+    try:
+        try:
+            max_frames = min(12, max(2, int(os.getenv("COSMOS_SEQUENCE_MAX_FRAMES", "8"))))
+            max_bytes = max(1_000_000, int(os.getenv("COSMOS_SEQUENCE_MAX_BYTES", "50000000")))
+            if len(body) > max_bytes:
+                raise ValueError("sequence archive exceeds size limit")
+            with zipfile.ZipFile(io.BytesIO(body)) as archive:
+                members = sorted(
+                    (item for item in archive.infolist() if not item.is_dir() and item.filename.lower().endswith((".jpg", ".jpeg", ".png"))),
+                    key=lambda item: item.filename,
+                )
+                if not 2 <= len(members) <= max_frames:
+                    raise ValueError(f"sequence must contain 2 to {max_frames} image frames")
+                if sum(item.file_size for item in members) > max_bytes:
+                    raise ValueError("uncompressed sequence exceeds size limit")
+                images = [_resize_for_live_inference(Image.open(io.BytesIO(archive.read(item))).convert("RGB")) for item in members]
+        except Exception as exc:
+            return JSONResponse({"status": "error", "detail": f"invalid frame sequence: {exc}"}, status_code=400)
+
+        offsets = []
+        try:
+            parsed_offsets = json.loads(x_cosmos_frame_offsets or "[]")
+            if isinstance(parsed_offsets, list):
+                offsets = [round(float(value), 3) for value in parsed_offsets][:len(images)]
+        except (TypeError, ValueError, json.JSONDecodeError):
+            pass
+        offset_text = ", ".join(f"{value:.3f}s" for value in offsets) if offsets else "không có mốc thời gian chính xác"
+        sequence_context = (
+            "Đây là chuỗi {} frame theo đúng thứ tự thời gian, thuộc cửa sổ video {}s–{}s. "
+            "Các frame tương ứng các mốc: {}. Hãy đối chiếu toàn bộ chuỗi trước khi kết luận."
+        ).format(len(images), x_cosmos_window_start or "?", x_cosmos_window_end or "?", offset_text)
+        active_prompt_profile = _active_live_prompt_profile(x_cosmos_prompt_profile)
+        t0 = time.perf_counter()
+        try:
+            result_text = _run_inference(images, prompt_profile=active_prompt_profile, sequence_context=sequence_context)
+        except Exception as exc:
+            logger.error("Sequence inference error: %s", exc)
+            return JSONResponse({"status": "error", "detail": str(exc)}, status_code=500)
+        result = _extract_and_parse_json(result_text)
+        return {
+            "status": "ok",
+            "timestamp": datetime.now().astimezone().isoformat(timespec="seconds"),
+            "inference_ms": int((time.perf_counter() - t0) * 1000),
+            "result": result,
+            "frame_count": len(images),
+            "frame_offsets_seconds": offsets,
+            "window_start_seconds": x_cosmos_window_start,
+            "window_end_seconds": x_cosmos_window_end,
+            "analysis_source": x_cosmos_analysis_source or "video_sequence",
+        }
     finally:
         _inference_lock.release()
 

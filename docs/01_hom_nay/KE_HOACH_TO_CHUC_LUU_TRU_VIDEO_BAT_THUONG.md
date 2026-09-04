@@ -249,6 +249,12 @@ python CameraAI\reconcile_data_stores.py
 
 Report JSON chứa từng `legacy_event_id` chỉ có ở SQLite/PostgreSQL và từng clip reference không mở được từ NAS. Report nằm ở `CameraAI/storage/reconciliation/` và không thay đổi database hay video.
 
+### Phân tích AI video theo chuỗi thời gian
+
+Phân tích clip không dùng ba ảnh tĩnh cố định nữa. CameraAI chia video thành các cửa sổ 10 giây (có thể chỉnh qua `VIDEO_ANALYSIS_WINDOW_SECONDS`); mỗi cửa sổ có tối đa 8 frame (qua `VIDEO_ANALYSIS_MAX_FRAMES_PER_WINDOW`). Frame đầu/cuối và các frame có thay đổi hình ảnh lớn được gửi cùng một request sang Cosmos. Vì vậy video 10 giây là một chuỗi, video 1 phút là sáu chuỗi nhỏ có mốc thời gian rõ ràng; không nhồi toàn bộ video vào context của mô hình.
+
+Cosmos chỉ kết luận chuyển động, ngã, giằng co hoặc vật bị bỏ lại khi bằng chứng xuất hiện qua nhiều frame của cùng cửa sổ. Kết quả CameraAI lưu theo từng cửa sổ `[bắt đầu–kết thúc]`, rồi tổng hợp mức rủi ro cao nhất cho báo cáo.
+
 ## 10. Các quyết định cần chốt trước khi code
 
 1. NAS là SMB/NFS hay MinIO/S3-compatible? Dung lượng và đường dẫn/prefix được cấp?

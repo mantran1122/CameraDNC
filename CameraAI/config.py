@@ -71,11 +71,11 @@ METADATA_RETENTION_DAYS = max(1, int(_current_cfg.get("metadata_retention_days",
 COSMOS_AUDIO_URL = os.getenv("COSMOS_AUDIO_URL", "http://127.0.0.1:8765/transcribe")
 COSMOS_VIDEO_URL = os.getenv("COSMOS_VIDEO_URL", "http://127.0.0.1:8765/analyze")
 COSMOS_PROMPT_PROFILE = _current_cfg.get("cosmos_prompt_profile", "comprehensive")
-VIDEO_ANALYSIS_SAMPLE_OFFSETS = tuple(
-    float(value.strip())
-    for value in os.getenv("VIDEO_ANALYSIS_SAMPLE_OFFSETS", "1,5,9").split(",")
-    if value.strip()
-)
+# Video analysis is performed as ordered short sequences, rather than three
+# unrelated still frames.  Keeping each sequence bounded protects the 2B VLM
+# context while allowing longer playback clips to be processed window by window.
+VIDEO_ANALYSIS_WINDOW_SECONDS = max(5.0, float(os.getenv("VIDEO_ANALYSIS_WINDOW_SECONDS", "10")))
+VIDEO_ANALYSIS_MAX_FRAMES_PER_WINDOW = min(12, max(4, int(os.getenv("VIDEO_ANALYSIS_MAX_FRAMES_PER_WINDOW", "8"))))
 AUDIO_ANALYSIS_BACKFILL_LIMIT = max(0, int(os.getenv("AUDIO_ANALYSIS_BACKFILL_LIMIT", "50")))
 # Optional OpenAI-compatible endpoint used only to turn completed audio evidence
 # into an operator-facing suggestion.  Audio transcription does not depend on it.
