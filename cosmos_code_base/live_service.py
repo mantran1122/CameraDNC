@@ -969,10 +969,6 @@ def transcribe(
             "task": "transcribe",
             "do_sample": False,
             "num_beams": _audio_beam_size(),
-            # Whisper requires timestamp prediction for long-form input (>30s).
-            # Keeping this on for both short and long clips makes /transcribe
-            # accept manual test videos without returning HTTP 500.
-            "return_timestamps": True,
             # Do not let a weak/noisy chunk inherit words from a preceding
             # chunk. This notably reduces Whisper's silence hallucinations.
             "condition_on_prev_tokens": False,
@@ -982,7 +978,16 @@ def transcribe(
         import torch
 
         with torch.inference_mode():
-            result = _get_audio_transcriber()(wav_path, generate_kwargs=generate_kwargs)
+            # `return_timestamps` must be a pipeline argument (not only nested
+            # inside generate_kwargs) for current Transformers Whisper long-form
+            # generation. Chunking also bounds memory for manual test videos.
+            result = _get_audio_transcriber()(
+                wav_path,
+                return_timestamps=True,
+                chunk_length_s=30,
+                stride_length_s=5,
+                generate_kwargs=generate_kwargs,
+            )
             text = " ".join(str(result.get("text", "")).split())
             repetitive = _is_repetitive_transcript(text)
             hallucination = _is_known_audio_hallucination(text)
@@ -998,7 +1003,13 @@ def transcribe(
                 # rather than replacing it with a guessed alternative.
                 verifier_kwargs = dict(generate_kwargs)
                 verifier_kwargs["num_beams"] = 1
-                verifier = _get_audio_transcriber()(wav_path, generate_kwargs=verifier_kwargs)
+                verifier = _get_audio_transcriber()(
+                    wav_path,
+                    return_timestamps=True,
+                    chunk_length_s=30,
+                    stride_length_s=5,
+                    generate_kwargs=verifier_kwargs,
+                )
                 verifier_text = " ".join(str(verifier.get("text", "")).split())
                 decoder_disagreement = not _audio_transcripts_agree(text, verifier_text)
         duplicate = _is_duplicate_audio_transcript(text, x_cosmos_device_id or "unknown", x_cosmos_channel)
