@@ -3,13 +3,14 @@ import json
 import asyncio
 import threading
 import secrets
+import uuid
 from urllib.parse import quote
 from typing import List, Optional
-from datetime import date
+from datetime import date, datetime
 import requests
 from requests.auth import HTTPDigestAuth
 
-from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, Query, BackgroundTasks, Depends, HTTPException, status
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, Query, BackgroundTasks, Depends, HTTPException, status, UploadFile, File
 from fastapi.responses import HTMLResponse, FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -253,6 +254,46 @@ async def data_health_page(request: Request, _: str = Depends(require_database_a
 @app.get("/api/admin/data-health")
 async def data_health_api(refresh: bool = False, _: str = Depends(require_database_admin)):
     return data_health.get_data_health(force=refresh)
+
+@app.get("/test-ai", response_class=HTMLResponse)
+async def test_ai_page(request: Request, _: str = Depends(require_database_admin)):
+    return templates.TemplateResponse(request=request, name="test_ai.html")
+
+@app.post("/api/admin/test-videos/upload")
+async def upload_test_video(video: UploadFile = File(...), _: str = Depends(require_database_admin)):
+    """Store an operator-selected test video separately from camera evidence."""
+    original_name = video.filename or "video.mp4"
+    suffix = os.path.splitext(original_name)[1].lower()
+    allowed_suffixes = {".mp4", ".mov", ".mkv", ".avi", ".webm"}
+    if suffix not in allowed_suffixes:
+        raise HTTPException(status_code=415, detail="Chỉ nhận MP4, MOV, MKV, AVI hoặc WEBM.")
+    max_bytes = max(1, int(os.getenv("CAMERAAI_MANUAL_TEST_MAX_UPLOAD_MB", "2048"))) * 1024 * 1024
+    now = datetime.now()
+    reference = f"manual-tests/{now:%Y}/{now:%m}/{now:%d}/test_{now:%Y%m%dT%H%M%S}_{uuid.uuid4().hex[:12]}{suffix}"
+    target = resolve_clip_path(reference)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    written = 0
+    try:
+        with target.open("wb") as output:
+            while chunk := await video.read(1024 * 1024):
+                written += len(chunk)
+                if written > max_bytes:
+                    raise HTTPException(status_code=413, detail=f"Video vượt giới hạn {max_bytes // 1024 // 1024} MB.")
+                output.write(chunk)
+    except Exception:
+        if target.exists():
+            target.unlink()
+        raise
+    finally:
+        await video.close()
+    event_id = database.save_event(
+        event_code="ManualTest", event_type="video_anomaly", channel=1,
+        timestamp=now.strftime("%Y-%m-%d %H:%M:%S"),
+        description=f"Manual AI test: {os.path.basename(original_name)}", severity="info",
+        metadata_dict={"source": "manual_upload", "original_filename": os.path.basename(original_name), "size_bytes": written},
+        clip_filename=reference,
+    )
+    return {"event": database.get_event_by_id(event_id)}
 
 @app.get("/api/events")
 async def get_events_api(
