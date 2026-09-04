@@ -65,3 +65,6 @@ CMakeFiles/
 # Preserved metadata of the formerly nested Cosmos repository
 .cosmos_code_base.git.backup/
 .cloud_ai_first.git.backup/
+
+# Operator-uploaded prompt profiles stay on the deployed machine, not in Git.
+cosmos_code_base/prompts/profiles/custom_*.txt

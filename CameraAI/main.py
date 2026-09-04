@@ -4,6 +4,8 @@ import asyncio
 import threading
 import secrets
 import uuid
+import re
+from pathlib import Path
 from urllib.parse import quote
 from typing import List, Optional
 from datetime import date, datetime
@@ -452,6 +454,32 @@ class CosmosPromptProfileModel(BaseModel):
     profile: str
 
 COSMOS_PROMPT_PROFILES = {"generic", "comprehensive", "security", "safety", "traffic", "classroom", "crowd_operations", "student_affairs", "admissions"}
+COSMOS_HIDDEN_PROMPT_PROFILES = {"live_admissions_prompt"}  # legacy template, not a selectable profile
+COSMOS_PROMPT_PROFILES_DIR = Path(os.getenv(
+    "CAMERAAI_COSMOS_PROMPTS_DIR",
+    str(config.BASE_DIR.parent / "cosmos_code_base" / "prompts" / "profiles"),
+))
+
+
+def _is_valid_cosmos_profile_name(profile: str) -> bool:
+    return bool(re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,63}", profile))
+
+
+def _available_cosmos_prompt_profiles() -> list[str]:
+    profiles = set(COSMOS_PROMPT_PROFILES)
+    if COSMOS_PROMPT_PROFILES_DIR.is_dir():
+        profiles.update(
+            path.stem.lower()
+            for path in COSMOS_PROMPT_PROFILES_DIR.glob("*.txt")
+            if _is_valid_cosmos_profile_name(path.stem.lower()) and path.stem.lower() not in COSMOS_HIDDEN_PROMPT_PROFILES
+        )
+    return sorted(profiles)
+
+
+def _cosmos_prompt_file(profile: str) -> Path:
+    if not _is_valid_cosmos_profile_name(profile):
+        raise HTTPException(status_code=422, detail="Tên prompt không hợp lệ.")
+    return COSMOS_PROMPT_PROFILES_DIR / f"{profile}.txt"
 
 @app.get("/api/config/nvr")
 async def get_nvr_config():
@@ -470,15 +498,55 @@ async def get_nvr_config():
 
 @app.get("/api/admin/cosmos/prompt-profile")
 async def get_cosmos_prompt_profile(_: str = Depends(require_database_admin)):
-    return {"selected": config.COSMOS_PROMPT_PROFILE, "profiles": sorted(COSMOS_PROMPT_PROFILES)}
+    return {"selected": config.COSMOS_PROMPT_PROFILE, "profiles": _available_cosmos_prompt_profiles()}
 
 @app.post("/api/admin/cosmos/prompt-profile")
 async def set_cosmos_prompt_profile(payload: CosmosPromptProfileModel, _: str = Depends(require_database_admin)):
     profile = payload.profile.strip().lower()
-    if profile not in COSMOS_PROMPT_PROFILES:
+    if profile not in _available_cosmos_prompt_profiles():
         raise HTTPException(status_code=422, detail="Prompt profile không được hỗ trợ.")
     config.set_cosmos_prompt_profile(profile)
     return {"selected": profile, "message": "Profile đã lưu; áp dụng cho lần phân tích video kế tiếp."}
+
+
+@app.get("/api/admin/cosmos/prompt-profiles/{profile}")
+async def get_cosmos_prompt_text(profile: str, _: str = Depends(require_database_admin)):
+    profile = profile.strip().lower()
+    path = _cosmos_prompt_file(profile)
+    if path.is_file():
+        return {"profile": profile, "source": str(path), "text": path.read_text(encoding="utf-8")}
+    if profile == "generic":
+        return {"profile": profile, "source": "built-in", "text": "Prompt giám sát cơ bản tích hợp trong Cosmos (không có file profile riêng)."}
+    raise HTTPException(status_code=404, detail="Không tìm thấy file prompt.")
+
+
+@app.post("/api/admin/cosmos/prompt-profiles/upload")
+async def upload_cosmos_prompt_profile(prompt_file: UploadFile = File(...), _: str = Depends(require_database_admin)):
+    """Store an operator-created profile beside the deployed Cosmos profiles.
+
+    Only `custom_*.txt` can be written so a web upload cannot overwrite a
+    tracked built-in profile.  These files are ignored by Git and remain local.
+    """
+    original_name = prompt_file.filename or ""
+    if Path(original_name).suffix.lower() != ".txt":
+        raise HTTPException(status_code=422, detail="Chỉ nhận file prompt .txt.")
+    stem = re.sub(r"[^a-z0-9_-]+", "_", Path(original_name).stem.lower()).strip("_-")
+    if not stem:
+        raise HTTPException(status_code=422, detail="Tên file prompt không hợp lệ.")
+    profile = f"custom_{stem}"[:64]
+    try:
+        raw = await prompt_file.read(50_001)
+        if len(raw) > 50_000:
+            raise ValueError("Prompt vượt giới hạn 50 KB.")
+        text = raw.decode("utf-8").strip()
+        if not text:
+            raise ValueError("File prompt đang trống.")
+        COSMOS_PROMPT_PROFILES_DIR.mkdir(parents=True, exist_ok=True)
+        path = _cosmos_prompt_file(profile)
+        path.write_text(text + "\n", encoding="utf-8")
+    except (OSError, UnicodeDecodeError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=f"Không thể lưu prompt: {exc}") from exc
+    return {"profile": profile, "text": text, "message": "Đã tải prompt lên. Chọn và lưu để dùng mặc định."}
 
 @app.post("/api/config/nvr/test")
 async def test_nvr_connection(cfg: NVRConfigModel):
