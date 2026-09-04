@@ -212,6 +212,21 @@ python CameraAI\main.py
 
 Tài khoản chạy CameraAI phải có quyền đọc/ghi tại NAS. Không xóa bản cũ trước khi UI mở được clip từ NAS và số lượng/checksum đã được đối soát.
 
+### Nhập metadata SQLite sang PostgreSQL
+
+PostgreSQL chỉ lưu metadata và đường dẫn tương đối; video vẫn nằm trên NAS. Tool nhập là idempotent theo `legacy_event_id`, nên có thể chạy lại an toàn sau khi xử lý lỗi mạng.
+
+```powershell
+# Kiểm kê SQLite, không ghi PostgreSQL
+python CameraAI\migrate_sqlite_to_postgres.py
+
+# Sau khi PostgreSQL đã được tạo và ứng dụng đã cài psycopg
+$env:CAMERAAI_POSTGRES_URL = "postgresql://cameraai:MAT_KHAU@localhost:5432/cameraai"
+python CameraAI\migrate_sqlite_to_postgres.py --apply --storage-backend nas_primary
+```
+
+Không commit URL/mật khẩu database vào Git. Sau khi nhập, đối chiếu số `events`, `events_with_clip`, `audio_analyses` và `video_analyses` trước khi chuyển app sang đọc/ghi PostgreSQL.
+
 ## 10. Các quyết định cần chốt trước khi code
 
 1. NAS là SMB/NFS hay MinIO/S3-compatible? Dung lượng và đường dẫn/prefix được cấp?
