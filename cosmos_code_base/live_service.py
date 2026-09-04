@@ -254,9 +254,9 @@ def _load_model() -> None:
         logger.error("Model load failed: %s", exc)
 
 
-def _load_live_prompt() -> str:
+def _load_live_prompt(profile_override: str | None = None) -> str:
     prompts_dir = Path(__file__).resolve().parent / "prompts"
-    profile = os.getenv("COSMOS_LIVE_PROMPT_PROFILE", "admissions").strip().lower()
+    profile = (profile_override or os.getenv("COSMOS_LIVE_PROMPT_PROFILE", "admissions")).strip().lower()
     profile_path = prompts_dir / "profiles" / "{}.txt".format(profile)
     if profile_path.exists():
         return _LIVE_PROMPT + "\n\n" + profile_path.read_text(encoding="utf-8").strip()
@@ -272,10 +272,10 @@ def _load_live_prompt() -> str:
     return _LIVE_PROMPT
 
 
-def _active_live_prompt_profile() -> str:
+def _active_live_prompt_profile(profile_override: str | None = None) -> str:
     """Return the profile actually selected by the live service for diagnostics."""
     prompts_dir = Path(__file__).resolve().parent / "prompts"
-    profile = os.getenv("COSMOS_LIVE_PROMPT_PROFILE", "admissions").strip().lower()
+    profile = (profile_override or os.getenv("COSMOS_LIVE_PROMPT_PROFILE", "admissions")).strip().lower()
     if profile == "admissions":
         return "admissions"
     if (prompts_dir / "profiles" / "{}.txt".format(profile)).exists():
@@ -501,9 +501,9 @@ def _vietnamese_admissions_summary(risk_level: str) -> str:
     return risk_text
 
 
-def _build_prompt_text(image: Image.Image, detector_context: str = "") -> str:
+def _build_prompt_text(image: Image.Image, detector_context: str = "", prompt_profile: str | None = None) -> str:
     """Tạo prompt string theo chat template nếu processor hỗ trợ."""
-    prompt = _load_live_prompt()
+    prompt = _load_live_prompt(prompt_profile)
     messages = [
         {
             "role": "user",
@@ -592,9 +592,9 @@ def _extract_and_parse_json(output_text: str) -> dict:
     return parsed
 
 
-def _run_inference(image: Image.Image, detector_context: str = "") -> str:
+def _run_inference(image: Image.Image, detector_context: str = "", prompt_profile: str | None = None) -> str:
     """Chạy inference, trả về chuỗi text từ model."""
-    prompt_text = _build_prompt_text(image, detector_context)
+    prompt_text = _build_prompt_text(image, detector_context, prompt_profile)
     request = {
         "prompt": prompt_text,
         "multi_modal_data": {"image": [image]},
@@ -667,6 +667,7 @@ def analyze(
     x_cosmos_channel: str | None = Header(default=None),
     x_cosmos_captured_at: str | None = Header(default=None),
     x_cosmos_analysis_source: str | None = Header(default=None),
+    x_cosmos_prompt_profile: str | None = Header(default=None),
 ):
     """
     Nhận JPEG bytes, trả JSON phân tích.
@@ -696,7 +697,7 @@ def analyze(
                 status_code=400,
             )
 
-        active_prompt_profile = _active_live_prompt_profile()
+        active_prompt_profile = _active_live_prompt_profile(x_cosmos_prompt_profile)
         uniform_detection = None
         detector_context = ""
         if active_prompt_profile == "admissions":
@@ -715,7 +716,7 @@ def analyze(
                 logger.warning("Uniform detector unavailable: %s", exc)
 
         try:
-            result_text = _run_inference(image, detector_context)
+            result_text = _run_inference(image, detector_context, active_prompt_profile)
         except Exception as exc:
             logger.error("Inference error: %s", exc)
             return JSONResponse(

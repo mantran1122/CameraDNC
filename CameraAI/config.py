@@ -70,6 +70,7 @@ CLIP_READY_DELAY_SEC = _current_cfg.get("clip_ready_delay_sec", 2)
 METADATA_RETENTION_DAYS = max(1, int(_current_cfg.get("metadata_retention_days", 3)))
 COSMOS_AUDIO_URL = os.getenv("COSMOS_AUDIO_URL", "http://127.0.0.1:8765/transcribe")
 COSMOS_VIDEO_URL = os.getenv("COSMOS_VIDEO_URL", "http://127.0.0.1:8765/analyze")
+COSMOS_PROMPT_PROFILE = _current_cfg.get("cosmos_prompt_profile", "comprehensive")
 VIDEO_ANALYSIS_SAMPLE_OFFSETS = tuple(
     float(value.strip())
     for value in os.getenv("VIDEO_ANALYSIS_SAMPLE_OFFSETS", "1,5,9").split(",")
@@ -144,3 +145,10 @@ def update_global_config(new_cfg: dict):
     ACTIVE_CHANNELS = new_cfg.get("active_channels", ACTIVE_CHANNELS)
     DEMO_MODE = new_cfg.get("demo_mode", DEMO_MODE)
     ABNORMAL_EVENT_CODES = new_cfg.get("abnormal_event_codes", ABNORMAL_EVENT_CODES)
+
+def set_cosmos_prompt_profile(profile: str):
+    global COSMOS_PROMPT_PROFILE
+    cfg = load_config()
+    cfg["cosmos_prompt_profile"] = profile
+    save_config(cfg)
+    COSMOS_PROMPT_PROFILE = profile

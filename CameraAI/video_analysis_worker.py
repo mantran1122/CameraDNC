@@ -142,6 +142,7 @@ class VideoAnalysisWorker:
             "X-Cosmos-Channel": str(event["channel"]),
             "X-Cosmos-Captured-At": captured_at.isoformat(timespec="seconds"),
             "X-Cosmos-Analysis-Source": "event_clip",
+            "X-Cosmos-Prompt-Profile": config.COSMOS_PROMPT_PROFILE,
         }
         response = None
         for attempt in range(3):

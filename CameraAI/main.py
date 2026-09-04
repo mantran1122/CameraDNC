@@ -448,6 +448,11 @@ class NVRConfigModel(BaseModel):
     demo_mode: bool = False
     abnormal_event_codes: List[str] = []
 
+class CosmosPromptProfileModel(BaseModel):
+    profile: str
+
+COSMOS_PROMPT_PROFILES = {"generic", "comprehensive", "security", "safety", "traffic", "classroom", "crowd_operations", "student_affairs", "admissions"}
+
 @app.get("/api/config/nvr")
 async def get_nvr_config():
     return {
@@ -462,6 +467,18 @@ async def get_nvr_config():
         "abnormal_behavior_options": config.ABNORMAL_BEHAVIOR_OPTIONS,
         "ffmpeg_available": True
     }
+
+@app.get("/api/admin/cosmos/prompt-profile")
+async def get_cosmos_prompt_profile(_: str = Depends(require_database_admin)):
+    return {"selected": config.COSMOS_PROMPT_PROFILE, "profiles": sorted(COSMOS_PROMPT_PROFILES)}
+
+@app.post("/api/admin/cosmos/prompt-profile")
+async def set_cosmos_prompt_profile(payload: CosmosPromptProfileModel, _: str = Depends(require_database_admin)):
+    profile = payload.profile.strip().lower()
+    if profile not in COSMOS_PROMPT_PROFILES:
+        raise HTTPException(status_code=422, detail="Prompt profile không được hỗ trợ.")
+    config.set_cosmos_prompt_profile(profile)
+    return {"selected": profile, "message": "Profile đã lưu; áp dụng cho lần phân tích video kế tiếp."}
 
 @app.post("/api/config/nvr/test")
 async def test_nvr_connection(cfg: NVRConfigModel):
