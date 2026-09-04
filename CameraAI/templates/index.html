@@ -200,19 +200,23 @@
                         </div>
                         <div id="clip-video-analysis-error" class="audio-analysis-error"></div>
                     </section>
-                    <section class="audio-analysis-panel clip-panel" aria-live="polite">
+                    <section class="audio-analysis-panel clip-panel llm-panel" aria-live="polite">
                     <div class="audio-analysis-title">
-                        <span>LLM & âm thanh</span>
-                        <button id="analyze-audio-btn" class="btn-analyze-audio" type="button" onclick="requestAudioAnalysis()">🎙 Phân tích giọng nói</button>
+                        <span>Phân tích tổng hợp LLM</span>
+                        <button id="analyze-audio-btn" class="btn-analyze-audio" type="button" onclick="requestAudioAnalysis()">🤖 Chạy LLM</button>
                     </div>
+                    <p class="llm-help">LLM tổng hợp metadata NVR và transcript để đưa ra kết luận có căn cứ.</p>
                     <div id="clip-audio-status" class="audio-status">Chưa có dữ liệu</div>
                     <div class="audio-analysis-grid">
-                        <div><strong>Transcript:</strong><p id="clip-audio-transcript">-</p></div>
-                        <div><strong>Gợi ý AI:</strong><p id="clip-audio-summary">-</p></div>
-                        <div><strong>Rủi ro:</strong> <span id="clip-audio-risk">-</span></div>
+                        <div class="llm-result-wide"><strong>Kết luận LLM:</strong><p id="clip-audio-summary">-</p></div>
+                        <div><strong>Mức rủi ro:</strong> <span id="clip-audio-risk">-</span></div>
                         <div><strong>Hành động đề xuất:</strong><p id="clip-audio-action">-</p></div>
                     </div>
                     <div><strong>Evidence:</strong><ul id="clip-audio-evidence" class="audio-evidence"></ul></div>
+                    <details class="audio-transcript-details">
+                        <summary>Transcript âm thanh (nguồn evidence)</summary>
+                        <p id="clip-audio-transcript">-</p>
+                    </details>
                     <div id="clip-audio-error" class="audio-analysis-error"></div>
                     </section>
                 </div>

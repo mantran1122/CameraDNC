@@ -475,9 +475,9 @@ body {
 
 /* The clip viewer has independent, scrollable columns so a long AI/LLM log
    never pushes the video out of view. */
-.clip-modal-box { max-width: 1440px; max-height: 94vh; display: flex; flex-direction: column; }
+.clip-modal-box { width: 98vw; max-width: 1800px; max-height: 96vh; display: flex; flex-direction: column; }
 .clip-modal-body { min-height: 0; overflow: hidden; }
-.clip-workspace { display: grid; grid-template-columns: minmax(420px, 1.35fr) minmax(280px, 1fr) minmax(280px, 1fr); gap: 1rem; max-height: calc(94vh - 94px); }
+.clip-workspace { display: grid; grid-template-columns: minmax(500px, 1.45fr) minmax(330px, 1fr) minmax(360px, 1.1fr); gap: 1.25rem; max-height: calc(96vh - 94px); }
 .clip-panel { min-width: 0; min-height: 0; overflow-y: auto; scrollbar-gutter: stable; }
 .clip-video-panel { padding-right: .25rem; }
 .clip-panel-title { font-weight: 700; margin-bottom: .65rem; color: #e2e8f0; }
@@ -515,6 +515,12 @@ body {
     padding: 1rem;
     font-size: 0.875rem;
 }
+.llm-panel { background: rgba(16, 185, 129, 0.08); border-color: rgba(16, 185, 129, 0.35); }
+.llm-help { color: #a7f3d0; font-size: .8rem; line-height: 1.4; margin: -.2rem 0 .75rem; }
+.llm-result-wide { grid-column: 1 / -1; background: rgba(255, 255, 255, .045); border-radius: 8px; padding: .65rem; }
+.audio-transcript-details { margin-top: 1rem; border-top: 1px solid rgba(148, 163, 184, .2); padding-top: .75rem; color: var(--text-muted); }
+.audio-transcript-details summary { cursor: pointer; color: #bfdbfe; font-weight: 600; }
+.audio-transcript-details p { margin-top: .6rem; color: #dbeafe; white-space: pre-wrap; }
 .audio-analysis-title { font-weight: 700; margin-bottom: 0.65rem; display: flex; justify-content: space-between; align-items: center; gap: 0.75rem; }
 .clip-analysis-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 0.5rem; }
 .btn-analyze-audio { border: 1px solid rgba(16, 185, 129, 0.45); border-radius: 7px; padding: 0.35rem 0.6rem; background: rgba(16, 185, 129, 0.15); color: #6ee7b7; cursor: pointer; font: inherit; font-size: 0.75rem; }
@@ -531,7 +537,7 @@ body {
 .audio-analysis-grid p { margin-top: 0.25rem; color: #dbeafe; white-space: pre-wrap; }
 .audio-evidence { margin: 0.4rem 0 0 1.1rem; color: var(--text-muted); }
 .audio-analysis-error { margin-top: 0.75rem; color: #fca5a5; }
-@media (max-width: 960px) {
+@media (max-width: 1250px) {
     .clip-modal-box { width: 96%; }
     .clip-modal-body { overflow-y: auto; }
     .clip-workspace { grid-template-columns: 1fr; max-height: none; }
