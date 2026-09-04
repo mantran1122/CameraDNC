@@ -8,6 +8,13 @@ document.addEventListener('DOMContentLoaded', () => {
     loadNVRConfigUI();
     renderChannelGrid();
     initWebSocket();
+    const videoModal = document.getElementById('videoModal');
+    videoModal?.addEventListener('click', (event) => {
+        if (event.target === videoModal) closeClipModal();
+    });
+    document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape' && videoModal?.classList.contains('active')) closeClipModal();
+    });
 });
 
 // Populate 32 Channel Checkboxes Grid

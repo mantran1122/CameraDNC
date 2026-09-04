@@ -473,6 +473,15 @@ body {
     padding: 1.5rem;
 }
 
+/* The clip viewer has independent, scrollable columns so a long AI/LLM log
+   never pushes the video out of view. */
+.clip-modal-box { max-width: 1440px; max-height: 94vh; display: flex; flex-direction: column; }
+.clip-modal-body { min-height: 0; overflow: hidden; }
+.clip-workspace { display: grid; grid-template-columns: minmax(420px, 1.35fr) minmax(280px, 1fr) minmax(280px, 1fr); gap: 1rem; max-height: calc(94vh - 94px); }
+.clip-panel { min-width: 0; min-height: 0; overflow-y: auto; scrollbar-gutter: stable; }
+.clip-video-panel { padding-right: .25rem; }
+.clip-panel-title { font-weight: 700; margin-bottom: .65rem; color: #e2e8f0; }
+
 .video-container {
     width: 100%;
     background: black;
@@ -500,7 +509,6 @@ body {
 }
 
 .audio-analysis-panel {
-    margin-top: 1rem;
     background: rgba(99, 102, 241, 0.08);
     border: 1px solid rgba(99, 102, 241, 0.25);
     border-radius: 10px;
@@ -523,7 +531,13 @@ body {
 .audio-analysis-grid p { margin-top: 0.25rem; color: #dbeafe; white-space: pre-wrap; }
 .audio-evidence { margin: 0.4rem 0 0 1.1rem; color: var(--text-muted); }
 .audio-analysis-error { margin-top: 0.75rem; color: #fca5a5; }
-@media (max-width: 640px) { .audio-analysis-grid, .clip-hud-info { grid-template-columns: 1fr; } }
+@media (max-width: 960px) {
+    .clip-modal-box { width: 96%; }
+    .clip-modal-body { overflow-y: auto; }
+    .clip-workspace { grid-template-columns: 1fr; max-height: none; }
+    .clip-panel { overflow: visible; }
+}
+@media (max-width: 640px) { .audio-analysis-grid, .clip-hud-info { grid-template-columns: 1fr; } .modal-body { padding: 1rem; } }
 
 .abnormal-behavior-config { background: rgba(239, 68, 68, 0.08); border: 1px solid rgba(239, 68, 68, 0.28); border-radius: 8px; padding: 0.9rem 1rem; }
 .config-section-title { color: #fecaca; font-size: 0.875rem; font-weight: 700; }

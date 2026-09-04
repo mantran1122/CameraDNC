@@ -164,43 +164,47 @@
 
     <!-- Modal 1: 10-Second Video Clip Player -->
     <div class="modal-overlay" id="videoModal">
-        <div class="modal-box">
+        <div class="modal-box clip-modal-box" role="dialog" aria-modal="true" aria-labelledby="modal-event-title">
             <div class="modal-header">
                 <div class="modal-title" id="modal-event-title">Trình phát Video 10s Bất thường</div>
                 <button class="close-btn" onclick="closeClipModal()">&times;</button>
             </div>
-            <div class="modal-body">
-                <div class="video-container">
-                    <video id="modal-video-player" controls autoplay loop>
-                        <source id="modal-video-source" src="" type="video/mp4">
-                        Trình duyệt của bạn không hỗ trợ thẻ HTML5 Video.
-                    </video>
-                </div>
-                <div class="clip-hud-info">
-                    <div><strong>Kênh Camera:</strong> <span id="clip-detail-ch">-</span></div>
-                    <div><strong>Mốc thời gian:</strong> <span id="clip-detail-time">-</span></div>
-                    <div><strong>Loại sự kiện:</strong> <span id="clip-detail-type">-</span></div>
-                    <div><strong>Cường độ âm thanh:</strong> <span id="clip-detail-audio">-</span></div>
-                </div>
-                <section class="audio-analysis-panel" aria-live="polite">
-                    <div class="audio-analysis-title">
-                        <span>Phân tích AI clip</span>
-                        <div class="clip-analysis-actions">
-                            <button id="analyze-video-btn" class="btn-analyze-video" type="button" onclick="requestVideoAnalysis()">🎬 Phân tích video</button>
-                            <button id="analyze-audio-btn" class="btn-analyze-audio" type="button" onclick="requestAudioAnalysis()">🎙 Phân tích giọng nói</button>
+            <div class="modal-body clip-modal-body">
+                <div class="clip-workspace">
+                    <section class="clip-panel clip-video-panel">
+                        <div class="clip-panel-title">Video evidence</div>
+                        <div class="video-container">
+                            <video id="modal-video-player" controls autoplay loop>
+                                <source id="modal-video-source" src="" type="video/mp4">
+                                Trình duyệt của bạn không hỗ trợ thẻ HTML5 Video.
+                            </video>
                         </div>
+                        <div class="clip-hud-info">
+                            <div><strong>Kênh Camera:</strong> <span id="clip-detail-ch">-</span></div>
+                            <div><strong>Mốc thời gian:</strong> <span id="clip-detail-time">-</span></div>
+                            <div><strong>Loại sự kiện:</strong> <span id="clip-detail-type">-</span></div>
+                            <div><strong>Cường độ âm thanh:</strong> <span id="clip-detail-audio">-</span></div>
+                        </div>
+                    </section>
+                    <section class="audio-analysis-panel clip-panel" aria-live="polite">
+                        <div class="audio-analysis-title">
+                            <span>Phân tích hình ảnh</span>
+                            <button id="analyze-video-btn" class="btn-analyze-video" type="button" onclick="requestVideoAnalysis()">🎬 Phân tích video</button>
+                        </div>
+                        <div id="clip-video-analysis-status" class="video-analysis-status">Chưa có dữ liệu</div>
+                        <div class="audio-analysis-grid">
+                            <div><strong>Tóm tắt video:</strong><p id="clip-video-analysis-summary">-</p></div>
+                            <div><strong>Rủi ro:</strong> <span id="clip-video-analysis-risk">-</span></div>
+                            <div><strong>Đối tượng:</strong><p id="clip-video-analysis-events">-</p></div>
+                            <div><strong>Frame đã đọc:</strong> <span id="clip-video-analysis-frames">-</span></div>
+                        </div>
+                        <div id="clip-video-analysis-error" class="audio-analysis-error"></div>
+                    </section>
+                    <section class="audio-analysis-panel clip-panel" aria-live="polite">
+                    <div class="audio-analysis-title">
+                        <span>LLM & âm thanh</span>
+                        <button id="analyze-audio-btn" class="btn-analyze-audio" type="button" onclick="requestAudioAnalysis()">🎙 Phân tích giọng nói</button>
                     </div>
-                    <div class="analysis-subtitle">Hình ảnh</div>
-                    <div id="clip-video-analysis-status" class="video-analysis-status">Chưa có dữ liệu</div>
-                    <div class="audio-analysis-grid">
-                        <div><strong>Tóm tắt video:</strong><p id="clip-video-analysis-summary">-</p></div>
-                        <div><strong>Rủi ro:</strong> <span id="clip-video-analysis-risk">-</span></div>
-                        <div><strong>Đối tượng:</strong><p id="clip-video-analysis-events">-</p></div>
-                        <div><strong>Frame đã đọc:</strong> <span id="clip-video-analysis-frames">-</span></div>
-                    </div>
-                    <div id="clip-video-analysis-error" class="audio-analysis-error"></div>
-                    <div class="analysis-divider"></div>
-                    <div class="analysis-subtitle">Âm thanh</div>
                     <div id="clip-audio-status" class="audio-status">Chưa có dữ liệu</div>
                     <div class="audio-analysis-grid">
                         <div><strong>Transcript:</strong><p id="clip-audio-transcript">-</p></div>
@@ -210,7 +214,8 @@
                     </div>
                     <div><strong>Evidence:</strong><ul id="clip-audio-evidence" class="audio-evidence"></ul></div>
                     <div id="clip-audio-error" class="audio-analysis-error"></div>
-                </section>
+                    </section>
+                </div>
             </div>
         </div>
     </div>
