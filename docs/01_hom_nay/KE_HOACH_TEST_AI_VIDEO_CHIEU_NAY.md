@@ -20,6 +20,7 @@ Hoàn thành một luồng kiểm thử độc lập cho video có sẵn: ngư�
 | 2 | MP4 chỉ có hình | video analysis hoạt động; audio báo không có audio/không có speech rõ ràng |
 | 3 | MP4 có tiếng bất thường | STT/audio evidence, mức rủi ro và hành động LLM đúng evidence |
 | 4 | File sai định dạng/quá dung lượng | upload bị chặn, không tạo event/file dở dang |
+| 5 | Video dài hơn 30 giây | Whisper long-form trả transcript, không HTTP 500 |
 
 ## Trình tự vận hành
 

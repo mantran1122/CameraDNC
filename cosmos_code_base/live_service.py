@@ -842,6 +842,10 @@ def transcribe(
             "task": "transcribe",
             "do_sample": False,
             "num_beams": _audio_beam_size(),
+            # Whisper requires timestamp prediction for long-form input (>30s).
+            # Keeping this on for both short and long clips makes /transcribe
+            # accept manual test videos without returning HTTP 500.
+            "return_timestamps": True,
             # Do not let a weak/noisy chunk inherit words from a preceding
             # chunk. This notably reduces Whisper's silence hallucinations.
             "condition_on_prev_tokens": False,
