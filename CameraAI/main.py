@@ -20,6 +20,7 @@ import config
 import database
 import summary_engine
 import video_clipper
+import data_health
 from clip_storage import resolve_clip_path
 from audio_analysis_worker import AudioAnalysisWorker
 from video_analysis_worker import VideoAnalysisWorker
@@ -244,6 +245,14 @@ async def database_admin_api(
     _: str = Depends(require_database_admin),
 ):
     return database.get_database_overview(sample_limit=limit)
+
+@app.get("/admin/data-health", response_class=HTMLResponse)
+async def data_health_page(request: Request, _: str = Depends(require_database_admin)):
+    return templates.TemplateResponse(request=request, name="admin_data_health.html")
+
+@app.get("/api/admin/data-health")
+async def data_health_api(refresh: bool = False, _: str = Depends(require_database_admin)):
+    return data_health.get_data_health(force=refresh)
 
 @app.get("/api/events")
 async def get_events_api(
