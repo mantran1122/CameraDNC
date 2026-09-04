@@ -1,0 +1,113 @@
+"""Gemini final-report layer for CameraAI evidence.
+
+Cosmos provides per-window visual observations and PhoWhisper provides the
+optional transcript.  Gemini receives only that structured text evidence, not
+the original surveillance video or frames.
+"""
+
+import json
+import os
+from typing import Any
+from urllib.parse import quote
+
+import requests
+
+
+_RISK_LEVELS = {"none", "low", "medium", "high"}
+
+
+def _extract_json(text: str) -> dict[str, Any] | None:
+    start, end = text.find("{"), text.rfind("}")
+    if start < 0 or end <= start:
+        return None
+    try:
+        value = json.loads(text[start:end + 1])
+        return value if isinstance(value, dict) else None
+    except json.JSONDecodeError:
+        return None
+
+
+def _normalize_report(value: dict[str, Any]) -> dict[str, Any] | None:
+    summary = " ".join(str(value.get("summary", "")).split())
+    if not summary:
+        return None
+    risk_level = str(value.get("risk_level", "none")).lower()
+    evidence = value.get("evidence")
+    if not isinstance(evidence, list):
+        evidence = []
+    return {
+        "summary": summary[:4000],
+        "risk_level": risk_level if risk_level in _RISK_LEVELS else "none",
+        "recommended_action": " ".join(str(value.get("recommended_action", "")).split())[:1000],
+        "evidence": [
+            {"source": str(item.get("source", "Gemini"))[:80], "detail": str(item.get("detail", ""))[:500]}
+            for item in evidence if isinstance(item, dict) and item.get("detail")
+        ][:12],
+    }
+
+
+def generate_final_video_report(event: dict[str, Any], windows: list[dict[str, Any]], audio_analysis: dict[str, Any] | None) -> tuple[dict[str, Any] | None, str | None]:
+    """Return (report, model_id); return (None, None) when Gemini is disabled.
+
+    Any Gemini failure is intentionally non-fatal: the Cosmos result remains
+    available for the operator instead of turning a completed video analysis
+    into a failed one.
+    """
+    api_key = os.getenv("GEMINI_API_KEY", "").strip()
+    if not api_key:
+        return None, None
+    model = os.getenv("CAMERAAI_GEMINI_MODEL", "gemini-2.0-flash").strip()
+    if not model:
+        return None, None
+
+    visual_evidence = []
+    for window in windows:
+        result = window.get("result") if isinstance(window, dict) else {}
+        if not isinstance(result, dict):
+            continue
+        visual_evidence.append({
+            "time_range_seconds": [window.get("window_start_seconds"), window.get("window_end_seconds")],
+            "cosmos_summary": result.get("summary", ""),
+            "cosmos_risk_level": result.get("risk_level", "none"),
+            "cosmos_events": result.get("events", []),
+        })
+    transcript = ""
+    if audio_analysis and audio_analysis.get("status") == "completed":
+        transcript = str(audio_analysis.get("transcript") or "")[:6000]
+
+    evidence = {
+        "event": {"code": event.get("event_code"), "channel": event.get("channel"), "timestamp": event.get("timestamp")},
+        "visual_windows_from_cosmos": visual_evidence,
+        "audio_transcript_from_phowhisper": transcript or None,
+    }
+    instruction = """Bạn là lớp tổng hợp cuối cho hệ thống camera an ninh. Hãy viết hoàn toàn bằng tiếng Việt có dấu.
+Cosmos và PhoWhisper chỉ là bằng chứng không hoàn hảo, có thể sai. Không được bịa, không suy luận danh tính, ý định, nguyên nhân, thương tích hay hành vi không có trong bằng chứng. Chỉ tăng mức rủi ro khi nhiều bằng chứng hỗ trợ rõ ràng. Nếu video không đủ rõ để kết luận đánh nhau/ngã/xâm nhập, ghi rõ 'cần kiểm tra clip gốc'.
+Trả về đúng JSON, không markdown:
+{
+  "summary": "kết luận nghiệp vụ ngắn có mốc thời gian nếu có",
+  "risk_level": "none|low|medium|high",
+  "recommended_action": "hành động thực tế",
+  "evidence": [{"source":"Cosmos hoặc PhoWhisper","detail":"bằng chứng có mốc thời gian"}]
+}
+
+Dữ liệu bằng chứng:
+""" + json.dumps(evidence, ensure_ascii=False)
+    payload = {
+        "contents": [{"role": "user", "parts": [{"text": instruction}]}],
+        "generationConfig": {"temperature": 0.1, "maxOutputTokens": 900, "responseMimeType": "application/json"},
+    }
+    endpoint = "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent".format(quote(model, safe=""))
+    try:
+        response = requests.post(endpoint, headers={"x-goog-api-key": api_key}, json=payload, timeout=75)
+        response.raise_for_status()
+        payload = response.json()
+        parts = payload.get("candidates", [{}])[0].get("content", {}).get("parts", [])
+        text = "".join(str(part.get("text", "")) for part in parts if isinstance(part, dict))
+        report = _normalize_report(_extract_json(text) or {})
+        if not report:
+            print("[GEMINI] No usable JSON report returned")
+            return None, None
+        return report, model
+    except (requests.RequestException, ValueError, IndexError, KeyError) as exc:
+        print(f"[GEMINI] Final video report failed: {exc}")
+        return None, None

@@ -17,6 +17,7 @@ import requests
 import config
 import database
 from clip_storage import resolve_clip_path
+from gemini_video_report import generate_final_video_report
 
 
 _RISK_ORDER = {"none": 0, "low": 1, "medium": 2, "high": 3}
@@ -114,6 +115,14 @@ class VideoAnalysisWorker:
             })
 
         aggregate = self._aggregate(results)
+        gemini_report, gemini_model = generate_final_video_report(
+            event, results, database.get_audio_analysis(event_id)
+        )
+        if gemini_report:
+            aggregate["summary"] = gemini_report["summary"]
+            aggregate["risk_level"] = gemini_report["risk_level"]
+            if gemini_report["recommended_action"]:
+                aggregate["summary"] += "\nKhuyến nghị: " + gemini_report["recommended_action"]
         self._set_status(
             event_id,
             "completed",
@@ -121,7 +130,7 @@ class VideoAnalysisWorker:
             risk_level=aggregate["risk_level"],
             events=aggregate["events"],
             frames=results,
-            video_model=health_data.get("video_model"),
+            video_model=" + ".join(part for part in [health_data.get("video_model"), gemini_model] if part),
             analyzed_at=datetime.now().astimezone().isoformat(timespec="seconds"),
         )
 

@@ -255,6 +255,19 @@ Phân tích clip không dùng ba ảnh tĩnh cố định nữa. CameraAI chia v
 
 Cosmos chỉ kết luận chuyển động, ngã, giằng co hoặc vật bị bỏ lại khi bằng chứng xuất hiện qua nhiều frame của cùng cửa sổ. Kết quả CameraAI lưu theo từng cửa sổ `[bắt đầu–kết thúc]`, rồi tổng hợp mức rủi ro cao nhất cho báo cáo.
 
+### Gemini: lớp tổng hợp báo cáo cuối
+
+Cosmos chỉ tạo evidence hình ảnh theo từng cửa sổ; Gemini nhận các evidence đó cùng transcript PhoWhisper (nếu đã chạy) để viết kết luận và khuyến nghị hoàn toàn bằng tiếng Việt. Mặc định Gemini **không nhận video/ảnh gốc**, chỉ nhận JSON evidence và transcript nhằm giảm rủi ro lộ dữ liệu camera.
+
+Khai báo key trên máy chạy Web CameraAI, không ghi vào Git hoặc `nvr_config.json`:
+
+```powershell
+setx GEMINI_API_KEY "KEY_MOI_CUA_BAN"
+setx CAMERAAI_GEMINI_MODEL "gemini-2.0-flash"
+```
+
+Mở terminal mới và restart Web CameraAI sau khi đặt biến môi trường. Nếu key không tồn tại hoặc Gemini lỗi, phân tích Cosmos vẫn hoàn tất; hệ thống không làm mất evidence video.
+
 ## 10. Các quyết định cần chốt trước khi code
 
 1. NAS là SMB/NFS hay MinIO/S3-compatible? Dung lượng và đường dẫn/prefix được cấp?
