@@ -38,13 +38,18 @@ CREATE TABLE IF NOT EXISTS video_assets (
     id BIGSERIAL PRIMARY KEY,
     event_id BIGINT NOT NULL UNIQUE REFERENCES camera_events(id) ON DELETE CASCADE,
     camera_code TEXT NOT NULL REFERENCES cameras(code),
-    relative_path TEXT NOT NULL UNIQUE,
+    -- Legacy SQLite can legitimately link the same captured clip to more than
+    -- one event.  Asset ownership is unique per event, not per path.
+    relative_path TEXT NOT NULL,
     duration_seconds INTEGER,
     state TEXT NOT NULL DEFAULT 'available',
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     CHECK (relative_path !~ '(^/|\\\\|(^|/)\.\.(/|$))')
 );
 CREATE INDEX IF NOT EXISTS ix_video_assets_camera_path ON video_assets (camera_code, relative_path);
+
+-- Compatibility for a schema initialized by an earlier migration build.
+ALTER TABLE video_assets DROP CONSTRAINT IF EXISTS video_assets_relative_path_key;
 
 CREATE TABLE IF NOT EXISTS video_replicas (
     id BIGSERIAL PRIMARY KEY,
