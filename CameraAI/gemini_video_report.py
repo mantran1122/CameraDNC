@@ -14,6 +14,12 @@ import requests
 
 
 _RISK_LEVELS = {"none", "low", "medium", "high"}
+_RISK_ORDER = {"none": 0, "low": 1, "medium": 2, "high": 3}
+_VIETNAMESE_MARKS = set("ăâđêôơưáàảãạấầẩẫậắằẳẵặéèẻẽẹếềểễệíìỉĩịóòỏõọốồổỗộớờởỡợúùủũụứừửữựýỳỷỹỵ")
+_VIETNAMESE_WORDS = {
+    "không", "có", "người", "video", "đoạn", "hình", "ảnh", "mức", "rủi",
+    "ro", "cần", "kiểm", "tra", "phát", "hiện", "khuyến", "nghị", "thời", "gian",
+}
 
 
 def _extract_json(text: str) -> dict[str, Any] | None:
@@ -35,7 +41,7 @@ def _normalize_report(value: dict[str, Any]) -> dict[str, Any] | None:
     evidence = value.get("evidence")
     if not isinstance(evidence, list):
         evidence = []
-    return {
+    report = {
         "summary": summary[:4000],
         "risk_level": risk_level if risk_level in _RISK_LEVELS else "none",
         "recommended_action": " ".join(str(value.get("recommended_action", "")).split())[:1000],
@@ -43,6 +49,47 @@ def _normalize_report(value: dict[str, Any]) -> dict[str, Any] | None:
             {"source": str(item.get("source", "Gemini"))[:80], "detail": str(item.get("detail", ""))[:500]}
             for item in evidence if isinstance(item, dict) and item.get("detail")
         ][:12],
+    }
+    language_sample = report["summary"] + " " + report["recommended_action"]
+    if not _looks_vietnamese(language_sample):
+        return None
+    return report
+
+
+def _looks_vietnamese(text: str) -> bool:
+    lowered = text.casefold()
+    words = {word.strip(".,:;!?()[]{}\"'") for word in lowered.split()}
+    return bool(_VIETNAMESE_MARKS.intersection(lowered)) and len(words.intersection(_VIETNAMESE_WORDS)) >= 2
+
+
+def build_vietnamese_fallback(windows: list[dict[str, Any]]) -> dict[str, Any]:
+    """Create a Vietnamese-only safe result when the final LLM is unavailable."""
+    highest_risk = "none"
+    ranges = []
+    for window in windows:
+        result = window.get("result") if isinstance(window, dict) else {}
+        risk = str(result.get("risk_level", "none")).lower() if isinstance(result, dict) else "none"
+        if _RISK_ORDER.get(risk, 0) > _RISK_ORDER[highest_risk]:
+            highest_risk = risk
+        start, end = window.get("window_start_seconds"), window.get("window_end_seconds")
+        if isinstance(start, (int, float)) and isinstance(end, (int, float)):
+            ranges.append(f"{start:.1f}–{end:.1f} giây")
+    risk_text = {
+        "none": "chưa ghi nhận dấu hiệu rủi ro rõ ràng",
+        "low": "ghi nhận dấu hiệu mức thấp cần theo dõi",
+        "medium": "ghi nhận dấu hiệu mức trung bình cần kiểm tra",
+        "high": "ghi nhận dấu hiệu mức cao cần kiểm tra ngay",
+    }[highest_risk]
+    range_text = ", ".join(ranges[:6]) if ranges else "không xác định"
+    return {
+        "summary": (
+            f"Đã phân tích {len(windows)} đoạn hình ảnh; hệ thống {risk_text}. "
+            f"Các khoảng thời gian đã xử lý: {range_text}. "
+            "Mô tả chi tiết từ mô hình chưa đáp ứng yêu cầu tiếng Việt, cần kiểm tra clip gốc."
+        ),
+        "risk_level": highest_risk,
+        "recommended_action": "Đối chiếu clip gốc và chỉ xử lý cảnh báo khi bằng chứng hình ảnh hoặc âm thanh đủ rõ.",
+        "evidence": [],
     }
 
 

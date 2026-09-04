@@ -22,6 +22,7 @@ import tempfile
 import threading
 import time
 import unicodedata
+import wave
 import zipfile
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
@@ -348,7 +349,7 @@ def _get_audio_transcriber():
             torch.backends.cudnn.benchmark = True
         model = AutoModelForSpeechSeq2Seq.from_pretrained(
             model_id,
-            torch_dtype=dtype,
+            dtype=dtype,
             low_cpu_mem_usage=True,
             use_safetensors=False,
         )
@@ -373,6 +374,54 @@ def _get_audio_transcriber():
         except Exception:
             pass
     return _audio_transcriber
+
+
+def _audio_chunk_seconds() -> int:
+    """Return a safe duration that can never enter Whisper long-form mode."""
+    try:
+        return min(29, max(10, int(os.getenv("COSMOS_AUDIO_CHUNK_SECONDS", "25"))))
+    except ValueError:
+        return 25
+
+
+def _transcribe_short_wav_chunks(wav_path: str, generate_kwargs: dict) -> dict:
+    """Transcribe PCM WAV in chunks shorter than Whisper's 30-second limit."""
+    chunk_seconds = _audio_chunk_seconds()
+    transcriber = _get_audio_transcriber()
+    texts = []
+    chunks = []
+    with wave.open(wav_path, "rb") as source:
+        frame_rate = source.getframerate()
+        frames_per_chunk = max(1, frame_rate * chunk_seconds)
+        params = source.getparams()
+        start_frame = 0
+        while True:
+            pcm = source.readframes(frames_per_chunk)
+            if not pcm:
+                break
+            chunk_path = None
+            try:
+                with tempfile.NamedTemporaryFile(prefix="cosmos_audio_chunk_", suffix=".wav", delete=False) as output:
+                    chunk_path = output.name
+                with wave.open(chunk_path, "wb") as chunk_file:
+                    chunk_file.setparams(params)
+                    chunk_file.writeframes(pcm)
+                result = transcriber(chunk_path, generate_kwargs=generate_kwargs)
+                text = " ".join(str(result.get("text", "")).split())
+                start_seconds = start_frame / frame_rate
+                # Derive the actual end from byte geometry; the last chunk is
+                # commonly shorter than the configured duration.
+                bytes_per_frame = max(1, params.nchannels * params.sampwidth)
+                chunk_frames = len(pcm) // bytes_per_frame
+                end_seconds = (start_frame + chunk_frames) / frame_rate
+                if text:
+                    texts.append(text)
+                    chunks.append({"timestamp": [round(start_seconds, 3), round(end_seconds, 3)], "text": text})
+                start_frame += chunk_frames
+            finally:
+                if chunk_path:
+                    Path(chunk_path).unlink(missing_ok=True)
+    return {"text": " ".join(texts), "chunks": chunks}
 
 
 def _pcm16_wav_samples(body: bytes):
@@ -505,7 +554,7 @@ def _vietnamese_admissions_summary(risk_level: str) -> str:
 
 def _build_prompt_text(
     images: list[Image.Image], detector_context: str = "", prompt_profile: str | None = None,
-    sequence_context: str = "",
+    sequence_context: str = "", force_vietnamese: bool = False,
 ) -> str:
     """Build one prompt for an ordered still image or an ordered frame sequence."""
     prompt = _load_live_prompt(prompt_profile)
@@ -518,6 +567,16 @@ def _build_prompt_text(
             "Read the contact sheet from left to right, top to bottom. Compare the ordered frames. You may report a change, movement, fall, physical aggression, entry/exit, or an object left behind only when it is visibly supported by more than one frame. If evidence is unclear, say so rather than guessing.",
         )
         prompt += "\n\n" + sequence_context
+    prompt += """
+
+YÊU CẦU NGÔN NGỮ BẮT BUỘC:
+- Mọi giá trị văn bản trong JSON phải viết hoàn toàn bằng tiếng Việt có dấu.
+- Không trả lời bằng tiếng Anh, kể cả khi video có tiêu đề, phụ đề hoặc chữ tiếng Anh.
+- Không kể lại nội dung phim; chỉ mô tả bằng chứng nhìn thấy phục vụ giám sát.
+- Các khóa JSON giữ nguyên theo schema, nhưng summary và label sự kiện phải là tiếng Việt.
+"""
+    if force_vietnamese:
+        prompt += "\nKết quả trước đã sai ngôn ngữ. Hãy phân tích lại và chỉ xuất tiếng Việt có dấu."
     messages = [
         {
             "role": "user",
@@ -606,12 +665,46 @@ def _extract_and_parse_json(output_text: str) -> dict:
     return parsed
 
 
+_VIETNAMESE_CHARS = set("ăâđêôơưáàảãạấầẩẫậắằẳẵặéèẻẽẹếềểễệíìỉĩịóòỏõọốồổỗộớờởỡợúùủũụứừửữựýỳỷỹỵ")
+_VIETNAMESE_COMMON_WORDS = {
+    "có", "không", "người", "trong", "một", "những", "đang", "được", "và",
+    "tại", "khu", "vực", "hình", "ảnh", "phát", "hiện", "cần", "kiểm", "tra",
+}
+
+
+def _result_is_vietnamese(result: dict) -> bool:
+    text = str(result.get("summary", "")).casefold()
+    words = {word.strip(".,:;!?()[]{}\"'") for word in text.split()}
+    return bool(_VIETNAMESE_CHARS.intersection(text)) and len(words.intersection(_VIETNAMESE_COMMON_WORDS)) >= 2
+
+
+def _vietnamese_result_fallback(result: dict) -> dict:
+    """Never expose an English/free-form result when Vietnamese is mandatory."""
+    risk = str(result.get("risk_level", "none")).lower()
+    if risk not in {"none", "low", "medium", "high"}:
+        risk = "none"
+    risk_text = {
+        "none": "chưa ghi nhận dấu hiệu rủi ro rõ ràng",
+        "low": "ghi nhận dấu hiệu mức thấp cần theo dõi",
+        "medium": "ghi nhận dấu hiệu mức trung bình cần kiểm tra",
+        "high": "ghi nhận dấu hiệu mức cao cần kiểm tra ngay",
+    }[risk]
+    return {
+        "summary": (
+            f"Hệ thống đã phân tích hình ảnh và {risk_text}. "
+            "Mô tả chi tiết của mô hình chưa đáp ứng yêu cầu tiếng Việt; cần kiểm tra clip gốc."
+        ),
+        "risk_level": risk,
+        "events": [],
+    }
+
+
 def _run_inference(
     images: list[Image.Image], detector_context: str = "", prompt_profile: str | None = None,
-    sequence_context: str = "",
+    sequence_context: str = "", force_vietnamese: bool = False,
 ) -> str:
     """Chạy inference, trả về chuỗi text từ model."""
-    prompt_text = _build_prompt_text(images, detector_context, prompt_profile, sequence_context)
+    prompt_text = _build_prompt_text(images, detector_context, prompt_profile, sequence_context, force_vietnamese)
     request = {
         "prompt": prompt_text,
         "multi_modal_data": {"image": images},
@@ -692,6 +785,8 @@ async def health():
         "max_image_side": _cfg.get("max_image_side"),
         "audio_model": _active_audio_model_id(),
         "audio_beam_size": _audio_beam_size(),
+        "audio_chunk_seconds": _audio_chunk_seconds(),
+        "visual_output_language": "vi",
     }
 
 
@@ -776,6 +871,19 @@ def analyze(
         inference_ms = int((time.perf_counter() - t0) * 1000)
 
         result = _extract_and_parse_json(result_text)
+        language_retried = False
+        if not _result_is_vietnamese(result):
+            language_retried = True
+            logger.warning("Visual result was not Vietnamese; retrying once with a strict language instruction.")
+            try:
+                retry_text = _run_inference(
+                    [image], detector_context, active_prompt_profile, force_vietnamese=True
+                )
+                retry_result = _extract_and_parse_json(retry_text)
+                result = retry_result if _result_is_vietnamese(retry_result) else _vietnamese_result_fallback(result)
+            except Exception as exc:
+                logger.warning("Vietnamese visual retry failed: %s", exc)
+                result = _vietnamese_result_fallback(result)
         if not isinstance(result, dict):
             result = {
                 "summary": str(result),
@@ -830,6 +938,8 @@ def analyze(
             "replay": replay,
             "duplicate": duplicate,
             "analysis_source": x_cosmos_analysis_source or "live_frame",
+            "language": "vi",
+            "language_retried": language_retried,
         }
 
     finally:
@@ -898,6 +1008,20 @@ def analyze_sequence(
             logger.error("Sequence inference error: %s", exc)
             return JSONResponse({"status": "error", "detail": str(exc)}, status_code=500)
         result = _extract_and_parse_json(result_text)
+        language_retried = False
+        if not _result_is_vietnamese(result):
+            language_retried = True
+            logger.warning("Sequence result was not Vietnamese; retrying once with a strict language instruction.")
+            try:
+                retry_text = _run_inference(
+                    [contact_sheet], prompt_profile=active_prompt_profile,
+                    sequence_context=sequence_context, force_vietnamese=True,
+                )
+                retry_result = _extract_and_parse_json(retry_text)
+                result = retry_result if _result_is_vietnamese(retry_result) else _vietnamese_result_fallback(result)
+            except Exception as exc:
+                logger.warning("Vietnamese sequence retry failed: %s", exc)
+                result = _vietnamese_result_fallback(result)
         return {
             "status": "ok",
             "timestamp": datetime.now().astimezone().isoformat(timespec="seconds"),
@@ -908,6 +1032,8 @@ def analyze_sequence(
             "window_start_seconds": x_cosmos_window_start,
             "window_end_seconds": x_cosmos_window_end,
             "analysis_source": x_cosmos_analysis_source or "video_sequence",
+            "language": "vi",
+            "language_retried": language_retried,
         }
     finally:
         _inference_lock.release()
@@ -978,16 +1104,10 @@ def transcribe(
         import torch
 
         with torch.inference_mode():
-            # `return_timestamps` must be a pipeline argument (not only nested
-            # inside generate_kwargs) for current Transformers Whisper long-form
-            # generation. Chunking also bounds memory for manual test videos.
-            result = _get_audio_transcriber()(
-                wav_path,
-                return_timestamps=True,
-                chunk_length_s=30,
-                stride_length_s=5,
-                generate_kwargs=generate_kwargs,
-            )
+            # Manually keep every model call below 30 seconds. This avoids the
+            # Transformers long-form timestamp path and remains stable across
+            # PhoWhisper/Transformers versions.
+            result = _transcribe_short_wav_chunks(wav_path, generate_kwargs)
             text = " ".join(str(result.get("text", "")).split())
             repetitive = _is_repetitive_transcript(text)
             hallucination = _is_known_audio_hallucination(text)
@@ -1003,13 +1123,7 @@ def transcribe(
                 # rather than replacing it with a guessed alternative.
                 verifier_kwargs = dict(generate_kwargs)
                 verifier_kwargs["num_beams"] = 1
-                verifier = _get_audio_transcriber()(
-                    wav_path,
-                    return_timestamps=True,
-                    chunk_length_s=30,
-                    stride_length_s=5,
-                    generate_kwargs=verifier_kwargs,
-                )
+                verifier = _transcribe_short_wav_chunks(wav_path, verifier_kwargs)
                 verifier_text = " ".join(str(verifier.get("text", "")).split())
                 decoder_disagreement = not _audio_transcripts_agree(text, verifier_text)
         duplicate = _is_duplicate_audio_transcript(text, x_cosmos_device_id or "unknown", x_cosmos_channel)

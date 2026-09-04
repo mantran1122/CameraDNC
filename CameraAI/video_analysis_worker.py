@@ -17,7 +17,7 @@ import requests
 import config
 import database
 from clip_storage import resolve_clip_path
-from gemini_video_report import generate_final_video_report
+from gemini_video_report import build_vietnamese_fallback, generate_final_video_report
 
 
 _RISK_ORDER = {"none": 0, "low": 1, "medium": 2, "high": 3}
@@ -118,11 +118,11 @@ class VideoAnalysisWorker:
         gemini_report, gemini_model = generate_final_video_report(
             event, results, database.get_audio_analysis(event_id)
         )
-        if gemini_report:
-            aggregate["summary"] = gemini_report["summary"]
-            aggregate["risk_level"] = gemini_report["risk_level"]
-            if gemini_report["recommended_action"]:
-                aggregate["summary"] += "\nKhuyến nghị: " + gemini_report["recommended_action"]
+        final_report = gemini_report or build_vietnamese_fallback(results)
+        aggregate["summary"] = final_report["summary"]
+        aggregate["risk_level"] = final_report["risk_level"]
+        if final_report["recommended_action"]:
+            aggregate["summary"] += "\nKhuyến nghị: " + final_report["recommended_action"]
         self._set_status(
             event_id,
             "completed",
