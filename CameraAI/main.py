@@ -24,6 +24,7 @@ from clip_storage import resolve_clip_path
 from audio_analysis_worker import AudioAnalysisWorker
 from video_analysis_worker import VideoAnalysisWorker
 from clip_capture_worker import ClipCaptureWorker
+from postgres_sync import enabled as postgres_dual_write_enabled
 from dahua_client import DahuaNVRListener
 from simulator import NVRDataSimulator
 
@@ -99,6 +100,8 @@ video_analysis_worker = None
 clip_capture_worker = None
 metadata_cleanup_stop = threading.Event()
 metadata_cleanup_thread = None
+postgres_sync_stop = threading.Event()
+postgres_sync_thread = None
 # The FastAPI/Uvicorn event loop belongs to the server thread. Listener and
 # simulator threads use this stored reference to schedule WebSocket broadcasts.
 server_event_loop: Optional[asyncio.AbstractEventLoop] = None
@@ -152,18 +155,23 @@ def restart_listener_service():
 
 @app.on_event("startup")
 async def startup_event():
-    global server_event_loop, metadata_cleanup_thread
+    global server_event_loop, metadata_cleanup_thread, postgres_sync_thread
     server_event_loop = asyncio.get_running_loop()
     database.init_db()
     metadata_cleanup_stop.clear()
     metadata_cleanup_thread = threading.Thread(target=metadata_cleanup_loop, daemon=True, name="metadata-cleanup-worker")
     metadata_cleanup_thread.start()
+    if postgres_dual_write_enabled():
+        postgres_sync_stop.clear()
+        postgres_sync_thread = threading.Thread(target=postgres_sync_loop, daemon=True, name="postgres-sync-worker")
+        postgres_sync_thread.start()
+        print("[PostgreSQL Sync] Dual-write enabled; SQLite remains the read source.")
     restart_listener_service()
     print("[Server Startup] Dahua Internet Metadata & Anomaly Summarizer online.")
 
 @app.on_event("shutdown")
 async def shutdown_event():
-    global nvr_listener, simulator_thread, audio_analysis_worker, video_analysis_worker, clip_capture_worker, metadata_cleanup_thread, server_event_loop
+    global nvr_listener, simulator_thread, audio_analysis_worker, video_analysis_worker, clip_capture_worker, metadata_cleanup_thread, postgres_sync_thread, server_event_loop
     if nvr_listener:
         nvr_listener.stop()
     if simulator_thread:
@@ -175,9 +183,13 @@ async def shutdown_event():
     if clip_capture_worker:
         clip_capture_worker.stop()
     metadata_cleanup_stop.set()
+    postgres_sync_stop.set()
     if metadata_cleanup_thread:
         metadata_cleanup_thread.join(timeout=2)
         metadata_cleanup_thread = None
+    if postgres_sync_thread:
+        postgres_sync_thread.join(timeout=2)
+        postgres_sync_thread = None
     server_event_loop = None
 
 
@@ -206,6 +218,13 @@ def metadata_cleanup_loop() -> None:
     while not metadata_cleanup_stop.is_set():
         purge_expired_metadata()
         metadata_cleanup_stop.wait(6 * 60 * 60)
+
+def postgres_sync_loop() -> None:
+    while not postgres_sync_stop.is_set():
+        result = database.sync_postgres_outbox(limit=100)
+        if result.get("failed"):
+            print(f"[PostgreSQL Sync] Pending retry: {result}")
+        postgres_sync_stop.wait(30)
 
 # --- ROUTES & APIS ---
 

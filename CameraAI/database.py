@@ -128,6 +128,16 @@ def init_db():
         FOREIGN KEY(event_id) REFERENCES events(id)
     );
     """)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS postgres_sync_outbox (
+        event_id INTEGER NOT NULL,
+        action TEXT NOT NULL DEFAULT 'upsert',
+        queued_at TEXT NOT NULL,
+        attempts INTEGER NOT NULL DEFAULT 0,
+        last_error TEXT,
+        PRIMARY KEY (event_id, action)
+    );
+    """)
 
     # Repair legacy rows that were marked completed even though neither STT nor
     # an AI conclusion was produced.
@@ -141,6 +151,23 @@ def init_db():
     
     conn.commit()
     conn.close()
+
+def queue_postgres_sync(event_id: int, action: str = "upsert") -> None:
+    conn = get_db_connection()
+    conn.execute("INSERT INTO postgres_sync_outbox(event_id,action,queued_at,attempts,last_error) VALUES(?,?,?,?,NULL) ON CONFLICT(event_id,action) DO UPDATE SET queued_at=excluded.queued_at", (event_id, action, datetime.now().astimezone().isoformat(timespec="seconds"), 0))
+    conn.commit(); conn.close()
+
+def sync_postgres_outbox(limit: int = 100) -> Dict[str, int]:
+    try:
+        from postgres_sync import sync_pending
+        return sync_pending(limit=limit)
+    except Exception as exc:
+        print(f"[PostgreSQL Sync] {exc}")
+        return {"synced": 0, "failed": 1, "disabled": 0}
+
+def _queue_and_sync(event_id: int, action: str = "upsert") -> None:
+    queue_postgres_sync(event_id, action)
+    sync_postgres_outbox(limit=25)
 
 def save_event(
     event_code: str,
@@ -167,6 +194,7 @@ def save_event(
     event_id = cursor.lastrowid
     conn.commit()
     conn.close()
+    _queue_and_sync(event_id)
     return event_id
 
 def get_events(
@@ -235,6 +263,7 @@ def update_event_clip(event_id: int, clip_filename: str):
     cursor.execute("UPDATE events SET clip_filename = ? WHERE id = ?", (clip_filename, event_id))
     conn.commit()
     conn.close()
+    _queue_and_sync(event_id)
 
 
 def replace_event_clip_reference(event_id: int, old_reference: str, new_reference: str) -> bool:
@@ -248,6 +277,8 @@ def replace_event_clip_reference(event_id: int, old_reference: str, new_referenc
     updated = cursor.rowcount == 1
     conn.commit()
     conn.close()
+    if updated:
+        _queue_and_sync(event_id)
     return updated
 
 
@@ -267,6 +298,8 @@ def delete_expired_events(retention_days: int) -> List[str]:
         cursor.execute(f"DELETE FROM events WHERE id IN ({placeholders})", event_ids)
     conn.commit()
     conn.close()
+    for event_id in event_ids:
+        _queue_and_sync(event_id, action="delete")
     return filenames
 
 
@@ -287,6 +320,8 @@ def create_audio_analysis(event_id: int, status: str = "not_analyzed") -> bool:
     created = cursor.rowcount == 1
     conn.commit()
     conn.close()
+    if created:
+        _queue_and_sync(event_id)
     return created
 
 
@@ -318,6 +353,8 @@ def update_audio_analysis(event_id: int, **values: Any) -> bool:
     updated = cursor.rowcount == 1
     conn.commit()
     conn.close()
+    if updated:
+        _queue_and_sync(event_id)
     return updated
 
 
@@ -379,6 +416,8 @@ def create_video_analysis(event_id: int, status: str = "not_analyzed") -> bool:
     created = cursor.rowcount == 1
     conn.commit()
     conn.close()
+    if created:
+        _queue_and_sync(event_id)
     return created
 
 
@@ -408,6 +447,8 @@ def update_video_analysis(event_id: int, **values: Any) -> bool:
     updated = cursor.rowcount == 1
     conn.commit()
     conn.close()
+    if updated:
+        _queue_and_sync(event_id)
     return updated
 
 

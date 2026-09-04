@@ -227,6 +227,18 @@ python CameraAI\migrate_sqlite_to_postgres.py --apply --storage-backend nas_prim
 
 Không commit URL/mật khẩu database vào Git. Sau khi nhập, đối chiếu số `events`, `events_with_clip`, `audio_analyses` và `video_analyses` trước khi chuyển app sang đọc/ghi PostgreSQL.
 
+### Giai đoạn dual-write
+
+Sau khi đã nhập và đối chiếu PostgreSQL, bật dual-write khi khởi động CameraAI:
+
+```powershell
+$env:CAMERAAI_POSTGRES_URL = "host=127.0.0.1 port=5432 dbname=cameraai user=cameraai password='MAT_KHAU'"
+$env:CAMERAAI_POSTGRES_DUAL_WRITE = "1"
+python CameraAI\main.py
+```
+
+SQLite vẫn là nguồn đọc trong giai đoạn này. Mỗi event/clip/audio/video analysis được ghi SQLite trước, sau đó vào hàng đợi `postgres_sync_outbox` để PostgreSQL upsert. Khi PostgreSQL mất kết nối, event không mất; worker retry mỗi 30 giây. Chỉ chuyển PostgreSQL thành nguồn đọc sau khi hàng đợi về 0 và số lượng được đối chiếu qua một thời gian vận hành.
+
 ## 10. Các quyết định cần chốt trước khi code
 
 1. NAS là SMB/NFS hay MinIO/S3-compatible? Dung lượng và đường dẫn/prefix được cấp?
