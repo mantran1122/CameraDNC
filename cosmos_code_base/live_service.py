@@ -640,6 +640,7 @@ async def health():
     return {
         "status": status,
         "live_prompt_profile": _active_live_prompt_profile(),
+        "video_model": _cfg.get("model_id"),
         "audio_model": _active_audio_model_id(),
         "audio_beam_size": _audio_beam_size(),
     }
@@ -665,6 +666,7 @@ def analyze(
     x_cosmos_device_id: str | None = Header(default=None),
     x_cosmos_channel: str | None = Header(default=None),
     x_cosmos_captured_at: str | None = Header(default=None),
+    x_cosmos_analysis_source: str | None = Header(default=None),
 ):
     """
     Nhận JPEG bytes, trả JSON phân tích.
@@ -763,8 +765,11 @@ def analyze(
         except ValueError:
             channel = None
         captured_at = _parse_capture_time(x_cosmos_captured_at)
-        duplicate = _is_duplicate_live_result(result, x_cosmos_device_id or "", channel)
-        replay = None if duplicate else _record_live_event(result, captured_at, x_cosmos_device_id or "", channel)
+        # Historical event-clip analysis must not alter live-frame duplicate
+        # tracking or create a second replay event for the same NVR alert.
+        is_event_clip = x_cosmos_analysis_source == "event_clip"
+        duplicate = False if is_event_clip else _is_duplicate_live_result(result, x_cosmos_device_id or "", channel)
+        replay = None if is_event_clip or duplicate else _record_live_event(result, captured_at, x_cosmos_device_id or "", channel)
 
         return {
             "status": "ok",
@@ -774,6 +779,7 @@ def analyze(
             "uniform_detection": uniform_detection,
             "replay": replay,
             "duplicate": duplicate,
+            "analysis_source": x_cosmos_analysis_source or "live_frame",
         }
 
     finally:

@@ -186,6 +186,26 @@ X-Cosmos-Audio-Sha256: <sha256 WAV>
 - Không tự tạo clip giả trong production.
 - Không dùng transcript để thay thế metadata NVR.
 
+## Phân tích hình ảnh của clip event *(đã tích hợp bản đầu)*
+
+- [x] Thêm nút `Phân tích video` cạnh nút `Phân tích giọng nói` trong modal clip.
+- [x] Tạo bảng `video_analyses`, lưu kết quả suy luận riêng theo `event_id`; không sửa metadata NVR gốc.
+- [x] Tạo background worker lấy các frame đại diện tại giây 1, 5 và 9 của clip 10 giây.
+- [x] Gọi tuần tự Cosmos `POST /analyze` với header `X-Cosmos-Analysis-Source: event_clip`.
+- [x] Không để phân tích clip lịch sử tạo thêm replay event hoặc làm thay đổi bộ chống trùng của luồng live.
+- [x] Tổng hợp mức rủi ro cao nhất và lấy số lượng lớn nhất của từng loại đối tượng qua các frame, không cộng trùng.
+- [x] API `POST /api/events/{event_id}/video-analysis` enqueue job; API event trả thêm `video_analysis`.
+- [x] Dashboard hiển thị trạng thái, tóm tắt, rủi ro, đối tượng, số frame và lỗi nếu có.
+
+Cấu hình tùy chọn:
+
+```text
+COSMOS_VIDEO_URL=http://127.0.0.1:8765/analyze
+VIDEO_ANALYSIS_SAMPLE_OFFSETS=1,5,9
+```
+
+Giới hạn có chủ đích: `/analyze` hiện phân tích từng JPEG độc lập. Kết quả nhiều frame cung cấp ảnh chụp tại nhiều mốc, nhưng không được xem là bằng chứng chắc chắn về chuyển động, hướng di chuyển, ý định hoặc diễn biến liên tục. Muốn kết luận theo thời gian phải bổ sung endpoint/model video-native ở giai đoạn sau.
+
 ## Tiêu chí hoàn thành
 
 - Một metadata `AudioAnomaly` thật sinh ra đúng một job audio.
