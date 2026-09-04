@@ -20,6 +20,7 @@ import requests
 import config
 import database
 from clip_storage import resolve_clip_path
+from gemini_video_report import generate_final_video_report, get_gemini_public_config
 
 
 class AudioAnalysisWorker:
@@ -201,11 +202,23 @@ class AudioAnalysisWorker:
     def _create_suggestion(self, event: dict, transcription: dict) -> tuple[Optional[dict], Optional[str]]:
         """Create a strictly evidence-grounded suggestion after transcription.
 
-        The endpoint follows the OpenAI Chat Completions shape.  Keeping it
-        optional lets the audio pipeline remain usable when an LLM is offline.
+        Gemini is the primary final-report layer and combines the available
+        Cosmos windows with PhoWhisper text.  The older OpenAI-compatible
+        endpoint remains as an optional fallback for existing deployments.
         """
+        gemini_config = get_gemini_public_config()
+        if gemini_config["configured"]:
+            video_analysis = database.get_video_analysis(int(event["id"])) if event.get("id") else None
+            windows = video_analysis.get("frames", []) if video_analysis else []
+            audio_evidence = dict(transcription)
+            audio_evidence["status"] = "completed"
+            report, _ = generate_final_video_report(event, windows, audio_evidence)
+            if report:
+                return report, None
+            return None, "Gemini không tạo được kết luận. Kiểm tra API key, model và kết nối Internet."
+
         if not config.AUDIO_SUGGESTION_API_URL:
-            return None, "Chưa cấu hình dịch vụ gợi ý LLM."
+            return None, "Chưa cấu hình Gemini. Hãy nhập API key ở đầu trang Kiểm thử AI."
 
         evidence = {
             "nvr_metadata": event.get("metadata", {}),

@@ -27,6 +27,11 @@ import data_health
 from clip_storage import resolve_clip_path
 from audio_analysis_worker import AudioAnalysisWorker
 from video_analysis_worker import VideoAnalysisWorker
+from gemini_video_report import (
+    generate_final_video_report,
+    get_gemini_public_config,
+    save_gemini_local_config,
+)
 from clip_capture_worker import ClipCaptureWorker
 from postgres_sync import enabled as postgres_dual_write_enabled
 from dahua_client import DahuaNVRListener
@@ -402,6 +407,37 @@ async def request_video_analysis(event_id: int, options: Optional[VideoAnalysisO
     video_analysis_worker.enqueue(event_id, max_frames_per_window=max_frames)
     return {"queued": True, "video_analysis": analysis}
 
+
+@app.post("/api/events/{event_id}/llm-analysis")
+async def request_llm_analysis(event_id: int, _: str = Depends(require_database_admin)):
+    """Combine saved Cosmos and PhoWhisper evidence into one Gemini report."""
+    event = database.get_event_by_id(event_id)
+    if not event:
+        raise HTTPException(status_code=404, detail="Không tìm thấy sự kiện.")
+    if not get_gemini_public_config()["configured"]:
+        raise HTTPException(status_code=409, detail="Chưa cấu hình Gemini ở đầu trang Kiểm thử AI.")
+
+    video_analysis = database.get_video_analysis(event_id)
+    audio_analysis = database.get_audio_analysis(event_id)
+    windows = video_analysis.get("frames", []) if video_analysis else []
+    transcript = str((audio_analysis or {}).get("transcript") or "").strip()
+    if not windows and not transcript:
+        raise HTTPException(status_code=409, detail="Hãy phân tích hình ảnh hoặc âm thanh trước khi gọi Gemini.")
+
+    report, model = await asyncio.to_thread(
+        generate_final_video_report, event, windows, audio_analysis
+    )
+    if not report:
+        raise HTTPException(
+            status_code=502,
+            detail="Gemini không tạo được kết luận. Kiểm tra API key, model và kết nối Internet.",
+        )
+    if audio_analysis is None:
+        database.create_audio_analysis(event_id, status="not_analyzed")
+    database.update_audio_analysis(event_id, suggestion=report)
+    broadcast_audio_analysis_update(event_id)
+    return {"status": "completed", "model": model, "suggestion": report}
+
 @app.get("/api/summary/daily")
 async def get_daily_summary_api(date_str: Optional[str] = None):
     summary = summary_engine.generate_daily_summary(date_str)
@@ -460,6 +496,11 @@ class NVRConfigModel(BaseModel):
 class CosmosPromptProfileModel(BaseModel):
     profile: str
 
+
+class GeminiConfigModel(BaseModel):
+    api_key: str
+    model: str = "gemini-2.0-flash"
+
 COSMOS_PROMPT_PROFILES = {"generic", "comprehensive", "security", "safety", "traffic", "classroom", "crowd_operations", "student_affairs", "admissions"}
 COSMOS_HIDDEN_PROMPT_PROFILES = {"live_admissions_prompt"}  # legacy template, not a selectable profile
 COSMOS_PROMPT_PROFILES_DIR = Path(os.getenv(
@@ -506,6 +547,21 @@ async def get_nvr_config():
 @app.get("/api/admin/cosmos/prompt-profile")
 async def get_cosmos_prompt_profile(_: str = Depends(require_database_admin)):
     return {"selected": config.COSMOS_PROMPT_PROFILE, "profiles": _available_cosmos_prompt_profiles()}
+
+
+@app.get("/api/admin/gemini-config")
+async def get_gemini_config(_: str = Depends(require_database_admin)):
+    """Expose status only; never send the saved API key back to the browser."""
+    return get_gemini_public_config()
+
+
+@app.post("/api/admin/gemini-config")
+async def set_gemini_config(payload: GeminiConfigModel, _: str = Depends(require_database_admin)):
+    try:
+        result = save_gemini_local_config(payload.api_key, payload.model)
+    except (OSError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {**result, "message": "Đã lưu cấu hình Gemini cục bộ; có hiệu lực ngay."}
 
 @app.post("/api/admin/cosmos/prompt-profile")
 async def set_cosmos_prompt_profile(payload: CosmosPromptProfileModel, _: str = Depends(require_database_admin)):

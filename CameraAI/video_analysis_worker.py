@@ -115,9 +115,8 @@ class VideoAnalysisWorker:
             })
 
         aggregate = self._aggregate(results)
-        gemini_report, gemini_model = generate_final_video_report(
-            event, results, database.get_audio_analysis(event_id)
-        )
+        audio_analysis = database.get_audio_analysis(event_id)
+        gemini_report, gemini_model = generate_final_video_report(event, results, audio_analysis)
         final_report = gemini_report or build_vietnamese_fallback(results)
         aggregate["summary"] = final_report["summary"]
         aggregate["risk_level"] = final_report["risk_level"]
@@ -133,6 +132,14 @@ class VideoAnalysisWorker:
             video_model=" + ".join(part for part in [health_data.get("video_model"), gemini_model] if part),
             analyzed_at=datetime.now().astimezone().isoformat(timespec="seconds"),
         )
+        # Keep the report in the existing suggestion field so both the main
+        # event modal and /test-ai display the same Gemini conclusion.
+        if gemini_report:
+            if audio_analysis is None:
+                database.create_audio_analysis(event_id, status="not_analyzed")
+            database.update_audio_analysis(event_id, suggestion=gemini_report)
+            if self._on_updated:
+                self._on_updated(event_id)
 
     @staticmethod
     def _extract_adaptive_sequences(clip_path: Path, max_frames_per_window: int | None = None) -> list[dict]:

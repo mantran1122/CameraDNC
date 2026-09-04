@@ -121,3 +121,25 @@ class AudioAnalysisWorkerTest(unittest.TestCase):
         self.assertEqual(suggestion["risk_level"], "low")
         self.assertEqual(suggestion["evidence"][0]["source"], "audio transcript")
         self.assertEqual(post.call_args.kwargs["headers"]["Authorization"], "Bearer test-key")
+
+    def test_gemini_combines_video_windows_and_audio_transcript(self):
+        worker = audio_analysis_worker.AudioAnalysisWorker()
+        expected = {
+            "summary": "Có dấu hiệu cần kiểm tra.",
+            "risk_level": "medium",
+            "recommended_action": "Kiểm tra clip gốc.",
+            "evidence": [{"source": "Cosmos", "detail": "Có chuyển động mạnh."}],
+        }
+        video = {"frames": [{"result": {"summary": "Có chuyển động mạnh."}}]}
+        with patch.object(audio_analysis_worker, "get_gemini_public_config", return_value={"configured": True}), \
+             patch.object(audio_analysis_worker.database, "get_video_analysis", return_value=video), \
+             patch.object(audio_analysis_worker, "generate_final_video_report", return_value=(expected, "gemini-test")) as generate:
+            suggestion, error = worker._create_suggestion(
+                {"id": 7, "event_code": "ManualTest", "description": "Test"},
+                {"transcript": "Dừng lại", "speech_detected": 1},
+            )
+
+        self.assertIsNone(error)
+        self.assertEqual(suggestion, expected)
+        self.assertEqual(generate.call_args.args[1], video["frames"])
+        self.assertEqual(generate.call_args.args[2]["status"], "completed")

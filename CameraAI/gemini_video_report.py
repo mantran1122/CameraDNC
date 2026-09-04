@@ -7,6 +7,7 @@ the original surveillance video or frames.
 
 import json
 import os
+from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
@@ -20,6 +21,53 @@ _VIETNAMESE_WORDS = {
     "không", "có", "người", "video", "đoạn", "hình", "ảnh", "mức", "rủi",
     "ro", "cần", "kiểm", "tra", "phát", "hiện", "khuyến", "nghị", "thời", "gian",
 }
+_DEFAULT_MODEL = "gemini-2.0-flash"
+_LOCAL_CONFIG_FILE = Path(
+    os.getenv(
+        "CAMERAAI_GEMINI_CONFIG_FILE",
+        str(Path(__file__).resolve().parent / "storage" / "gemini_config.json"),
+    )
+)
+
+
+def get_gemini_settings() -> tuple[str, str, str]:
+    """Return (api_key, model, source), preferring environment variables."""
+    env_key = os.getenv("GEMINI_API_KEY", "").strip()
+    env_model = os.getenv("CAMERAAI_GEMINI_MODEL", "").strip()
+    if env_key:
+        return env_key, env_model or _DEFAULT_MODEL, "environment"
+    try:
+        saved = json.loads(_LOCAL_CONFIG_FILE.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        saved = {}
+    key = str(saved.get("api_key", "")).strip() if isinstance(saved, dict) else ""
+    model = str(saved.get("model", "")).strip() if isinstance(saved, dict) else ""
+    return key, model or env_model or _DEFAULT_MODEL, "local" if key else "none"
+
+
+def get_gemini_public_config() -> dict[str, Any]:
+    key, model, source = get_gemini_settings()
+    return {"configured": bool(key), "model": model, "source": source}
+
+
+def save_gemini_local_config(api_key: str, model: str = _DEFAULT_MODEL) -> dict[str, Any]:
+    """Persist an admin-supplied key locally; the storage directory is Git-ignored."""
+    clean_key = api_key.strip()
+    clean_model = model.strip() or _DEFAULT_MODEL
+    if len(clean_key) < 20:
+        raise ValueError("API key Gemini không hợp lệ.")
+    _LOCAL_CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
+    temporary = _LOCAL_CONFIG_FILE.with_suffix(".tmp")
+    temporary.write_text(
+        json.dumps({"api_key": clean_key, "model": clean_model}, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    temporary.replace(_LOCAL_CONFIG_FILE)
+    try:
+        os.chmod(_LOCAL_CONFIG_FILE, 0o600)
+    except OSError:
+        pass
+    return get_gemini_public_config()
 
 
 def _extract_json(text: str) -> dict[str, Any] | None:
@@ -100,10 +148,9 @@ def generate_final_video_report(event: dict[str, Any], windows: list[dict[str, A
     available for the operator instead of turning a completed video analysis
     into a failed one.
     """
-    api_key = os.getenv("GEMINI_API_KEY", "").strip()
+    api_key, model, _ = get_gemini_settings()
     if not api_key:
         return None, None
-    model = os.getenv("CAMERAAI_GEMINI_MODEL", "gemini-2.0-flash").strip()
     if not model:
         return None, None
 
@@ -119,7 +166,9 @@ def generate_final_video_report(event: dict[str, Any], windows: list[dict[str, A
             "cosmos_events": result.get("events", []),
         })
     transcript = ""
-    if audio_analysis and audio_analysis.get("status") == "completed":
+    # A valid transcript remains usable when a previous LLM attempt left the
+    # audio row in ``transcribed`` instead of ``completed``.
+    if audio_analysis:
         transcript = str(audio_analysis.get("transcript") or "")[:6000]
 
     evidence = {

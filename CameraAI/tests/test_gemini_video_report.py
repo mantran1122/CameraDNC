@@ -1,5 +1,6 @@
 import os
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
@@ -30,6 +31,21 @@ class GeminiVideoReportTest(unittest.TestCase):
         request_payload = post.call_args.kwargs["json"]
         self.assertIn("visual_windows_from_cosmos", request_payload["contents"][0]["parts"][0]["text"])
         self.assertNotIn("clip_filename", request_payload["contents"][0]["parts"][0]["text"])
+
+    def test_local_config_is_persisted_but_public_status_never_exposes_key(self):
+        with tempfile.TemporaryDirectory() as temp_dir, \
+             patch.object(gemini_video_report, "_LOCAL_CONFIG_FILE", Path(temp_dir) / "gemini_config.json"), \
+             patch.dict(os.environ, {}, clear=True):
+            public = gemini_video_report.save_gemini_local_config(
+                "test-gemini-api-key-with-enough-length", "test-model"
+            )
+            key, model, source = gemini_video_report.get_gemini_settings()
+
+        self.assertEqual(key, "test-gemini-api-key-with-enough-length")
+        self.assertEqual(model, "test-model")
+        self.assertEqual(source, "local")
+        self.assertEqual(public, {"configured": True, "model": "test-model", "source": "local"})
+        self.assertNotIn("api_key", public)
 
 
 if __name__ == "__main__":
