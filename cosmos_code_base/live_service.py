@@ -688,6 +688,8 @@ async def health():
         "status": status,
         "live_prompt_profile": _active_live_prompt_profile(),
         "video_model": _cfg.get("model_id"),
+        "max_model_len": _cfg.get("max_model_len"),
+        "max_image_side": _cfg.get("max_image_side"),
         "audio_model": _active_audio_model_id(),
         "audio_beam_size": _audio_beam_size(),
     }
@@ -1064,8 +1066,8 @@ def main() -> None:
     parser.add_argument(
         "--max-model-len",
         type=int,
-        default=2048,
-        help="Max context length (default: 8192 — đủ cho 1 frame)",
+        default=4096,
+        help="Max context length (default: 4096 — đủ cho prompt và contact-sheet video)",
     )
     parser.add_argument(
         "--max-new-tokens",
