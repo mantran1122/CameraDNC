@@ -5,7 +5,6 @@ from datetime import datetime, timedelta
 
 import config
 import database
-import video_clipper
 
 class NVRDataSimulator(threading.Thread):
     def __init__(self, broadcast_callback=None, audio_job_callback=None):
@@ -55,17 +54,6 @@ class NVRDataSimulator(threading.Thread):
                 dt = now - timedelta(minutes=random.randint(5, 60))
             ts_str = dt.strftime("%Y-%m-%d %H:%M:%S")
             
-            clip_name = None
-            if ev_type in ["audio_anomaly", "video_anomaly"]:
-                clip_filename = f"clip_ch{ch}_{dt.strftime('%Y%m%d_%H%M%S')}.mp4"
-                clip_name = video_clipper.clip_event_video(
-                    channel=ch,
-                    event_timestamp=dt,
-                    output_filename=clip_filename,
-                    event_type=ev_type,
-                    event_code=code
-                )
-                
             event_id = database.save_event(
                 event_code=code,
                 event_type=ev_type,
@@ -74,8 +62,7 @@ class NVRDataSimulator(threading.Thread):
                 description=desc,
                 severity=sev,
                 audio_level_db=db_val,
-                metadata_dict=meta,
-                clip_filename=clip_name
+                metadata_dict=meta
             )
             if ev_type in {"audio_anomaly", "video_anomaly"}:
                 database.create_audio_analysis(event_id, status="not_analyzed")
@@ -131,17 +118,6 @@ class NVRDataSimulator(threading.Thread):
                 db_val = None
                 meta = {"type": random.choice(["Car", "Motorbike", "SUV"]), "color": random.choice(["Black", "White", "Silver"])}
 
-            clip_name = None
-            if ev_type in ["audio_anomaly", "video_anomaly"]:
-                clip_filename = f"clip_ch{channel}_{now.strftime('%Y%m%d_%H%M%S')}.mp4"
-                clip_name = video_clipper.clip_event_video(
-                    channel=channel,
-                    event_timestamp=now,
-                    output_filename=clip_filename,
-                    event_type=ev_type,
-                    event_code=code
-                )
-
             ev_id = database.save_event(
                 event_code=code,
                 event_type=ev_type,
@@ -150,8 +126,7 @@ class NVRDataSimulator(threading.Thread):
                 description=desc,
                 severity=sev,
                 audio_level_db=db_val,
-                metadata_dict=meta,
-                clip_filename=clip_name
+                metadata_dict=meta
             )
             if ev_type in {"audio_anomaly", "video_anomaly"}:
                 database.create_audio_analysis(ev_id, status="not_analyzed")

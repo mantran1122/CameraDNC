@@ -184,9 +184,23 @@
                 </div>
                 <section class="audio-analysis-panel" aria-live="polite">
                     <div class="audio-analysis-title">
-                        <span>Phân tích âm thanh</span>
-                        <button id="analyze-audio-btn" class="btn-analyze-audio" type="button" onclick="requestAudioAnalysis()">🎙 Phân tích giọng nói</button>
+                        <span>Phân tích AI clip</span>
+                        <div class="clip-analysis-actions">
+                            <button id="analyze-video-btn" class="btn-analyze-video" type="button" onclick="requestVideoAnalysis()">🎬 Phân tích video</button>
+                            <button id="analyze-audio-btn" class="btn-analyze-audio" type="button" onclick="requestAudioAnalysis()">🎙 Phân tích giọng nói</button>
+                        </div>
                     </div>
+                    <div class="analysis-subtitle">Hình ảnh</div>
+                    <div id="clip-video-analysis-status" class="video-analysis-status">Chưa có dữ liệu</div>
+                    <div class="audio-analysis-grid">
+                        <div><strong>Tóm tắt video:</strong><p id="clip-video-analysis-summary">-</p></div>
+                        <div><strong>Rủi ro:</strong> <span id="clip-video-analysis-risk">-</span></div>
+                        <div><strong>Đối tượng:</strong><p id="clip-video-analysis-events">-</p></div>
+                        <div><strong>Frame đã đọc:</strong> <span id="clip-video-analysis-frames">-</span></div>
+                    </div>
+                    <div id="clip-video-analysis-error" class="audio-analysis-error"></div>
+                    <div class="analysis-divider"></div>
+                    <div class="analysis-subtitle">Âm thanh</div>
                     <div id="clip-audio-status" class="audio-status">Chưa có dữ liệu</div>
                     <div class="audio-analysis-grid">
                         <div><strong>Transcript:</strong><p id="clip-audio-transcript">-</p></div>

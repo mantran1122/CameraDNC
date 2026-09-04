@@ -6,7 +6,7 @@ import cv2
 import numpy as np
 
 import config
-from config import CLIPS_DIR
+from clip_storage import resolve_clip_path
 
 
 def _remove_partial_clip(output_path: str) -> None:
@@ -163,7 +163,8 @@ def clip_event_video(
     """
     Extracts a 10-second MP4 video clip from Dahua NVR RTSP playback stream over WAN/Internet.
     """
-    full_output_path = os.path.join(CLIPS_DIR, output_filename)
+    full_output_path = str(resolve_clip_path(output_filename))
+    os.makedirs(os.path.dirname(full_output_path), exist_ok=True)
     
     start_time = event_timestamp - timedelta(seconds=config.PRE_BUFFER_SEC)
     end_time = event_timestamp + timedelta(seconds=config.POST_BUFFER_SEC)

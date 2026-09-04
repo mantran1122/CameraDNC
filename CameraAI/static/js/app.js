@@ -1,5 +1,6 @@
 let activityChart = null;
 let audioAnalysisPollTimer = null;
+let videoAnalysisPollTimer = null;
 
 document.addEventListener('DOMContentLoaded', () => {
     fetchDailySummary();
@@ -255,6 +256,88 @@ function renderAudioAnalysisAction(ev) {
     button.textContent = ['video_missing', 'stt_failed', 'transcribed'].includes(status) ? '↻ Thử lại phân tích' : '🎙 Phân tích giọng nói';
 }
 
+function formatVideoAnalysisStatus(analysis) {
+    if (!analysis) return '';
+    const labels = {
+        not_analyzed: 'Chưa phân tích',
+        processing: 'Đang xếp hàng',
+        extracting_frames: 'Đang lấy frame đại diện',
+        analyzing_frames: 'Cosmos đang phân tích video',
+        video_missing: 'Không tìm thấy video evidence',
+        failed: 'Phân tích video thất bại',
+        completed: 'Đã phân tích video',
+    };
+    return labels[analysis.status] || analysis.status;
+}
+
+function renderVideoAnalysis(analysis) {
+    setText('clip-video-analysis-status', formatVideoAnalysisStatus(analysis), 'Chưa có dữ liệu');
+    setText('clip-video-analysis-summary', analysis?.summary, analysis?.status === 'not_analyzed' ? 'Bấm nút để bắt đầu.' : 'Chưa có kết quả.');
+    setText('clip-video-analysis-risk', analysis?.risk_level, '-');
+    const events = (analysis?.events || []).map(item => `${item.label}: ${item.count}`).join(', ');
+    setText('clip-video-analysis-events', events, 'Không ghi nhận đối tượng.');
+    setText('clip-video-analysis-frames', analysis?.frames?.length ? String(analysis.frames.length) : '', '-');
+    setText('clip-video-analysis-error', analysis?.error_message, '');
+}
+
+function renderVideoAnalysisAction(ev) {
+    const button = document.getElementById('analyze-video-btn');
+    if (!button) return;
+    const isAnomaly = ev && ['audio_anomaly', 'video_anomaly'].includes(ev.event_type);
+    const status = ev?.video_analysis?.status;
+    button.dataset.eventId = ev?.id || '';
+    button.hidden = !isAnomaly;
+    button.disabled = !ev?.clip_filename || ['processing', 'extracting_frames', 'analyzing_frames', 'completed'].includes(status);
+    button.textContent = ['video_missing', 'failed'].includes(status) ? '↻ Thử lại video' : '🎬 Phân tích video';
+}
+
+async function requestVideoAnalysis() {
+    const button = document.getElementById('analyze-video-btn');
+    const eventId = button?.dataset.eventId;
+    if (!eventId || button.disabled) return;
+    button.disabled = true;
+    button.textContent = '⏳ Đang xếp hàng...';
+    try {
+        const response = await fetch(`/api/events/${encodeURIComponent(eventId)}/video-analysis`, {method: 'POST'});
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Không thể tạo job phân tích video.');
+        renderVideoAnalysis(data.video_analysis);
+        startVideoAnalysisPolling(eventId);
+    } catch (error) {
+        button.disabled = false;
+        button.textContent = '🎬 Phân tích video';
+        setText('clip-video-analysis-error', error.message);
+    }
+}
+
+function startVideoAnalysisPolling(eventId) {
+    if (videoAnalysisPollTimer) clearInterval(videoAnalysisPollTimer);
+    const terminalStatuses = new Set(['not_analyzed', 'video_missing', 'failed', 'completed']);
+    let attempts = 0;
+    const refresh = async () => {
+        attempts += 1;
+        try {
+            const response = await fetch(`/api/events/${encodeURIComponent(eventId)}`);
+            if (!response.ok) throw new Error('Không thể cập nhật trạng thái phân tích video.');
+            const event = await response.json();
+            renderVideoAnalysis(event.video_analysis);
+            renderVideoAnalysisAction(event);
+            if (terminalStatuses.has(event.video_analysis?.status) || attempts >= 300) {
+                clearInterval(videoAnalysisPollTimer);
+                videoAnalysisPollTimer = null;
+            }
+        } catch (error) {
+            if (attempts >= 300) {
+                clearInterval(videoAnalysisPollTimer);
+                videoAnalysisPollTimer = null;
+                setText('clip-video-analysis-error', error.message);
+            }
+        }
+    };
+    refresh();
+    videoAnalysisPollTimer = setInterval(refresh, 1000);
+}
+
 async function requestAudioAnalysis() {
     const button = document.getElementById('analyze-audio-btn');
     const eventId = button?.dataset.eventId;
@@ -439,7 +522,7 @@ async function openClipModal(eventId, clipFilename, description) {
     const videoElem = document.getElementById('modal-video-player');
     const sourceElem = document.getElementById('modal-video-source');
     
-    const clipUrl = `/clips/${encodeURIComponent(clipFilename)}`;
+    const clipUrl = `/clips/${clipFilename.split('/').map(encodeURIComponent).join('/')}`;
     if (sourceElem) {
         sourceElem.src = clipUrl;
     }
@@ -457,6 +540,8 @@ async function openClipModal(eventId, clipFilename, description) {
         document.getElementById('clip-detail-audio').innerText = ev.audio_level_db ? `${ev.audio_level_db} dB` : 'N/A';
         renderAudioAnalysis(ev.audio_analysis);
         renderAudioAnalysisAction(ev);
+        renderVideoAnalysis(ev.video_analysis);
+        renderVideoAnalysisAction(ev);
     } catch(e) {}
 
     document.getElementById('videoModal').classList.add('active');
@@ -466,6 +551,10 @@ function closeClipModal() {
     if (audioAnalysisPollTimer) {
         clearInterval(audioAnalysisPollTimer);
         audioAnalysisPollTimer = null;
+    }
+    if (videoAnalysisPollTimer) {
+        clearInterval(videoAnalysisPollTimer);
+        videoAnalysisPollTimer = null;
     }
     const videoElem = document.getElementById('modal-video-player');
     if (videoElem) {

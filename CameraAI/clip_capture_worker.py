@@ -10,6 +10,7 @@ from typing import Callable, Optional
 import config
 import database
 import video_clipper
+from clip_storage import build_clip_reference, resolve_clip_path
 
 
 class ClipCaptureWorker:
@@ -48,24 +49,25 @@ class ClipCaptureWorker:
         event = database.get_event_by_id(event_id)
         if not event:
             return
-        saved = Path(str(event.get("clip_filename") or "")).name
-        if saved and (config.CLIPS_DIR / saved).is_file():
+        saved = str(event.get("clip_filename") or "")
+        if saved and resolve_clip_path(saved).is_file():
             return
         event_time = datetime.strptime(event["timestamp"], "%Y-%m-%d %H:%M:%S")
         delay = config.POST_BUFFER_SEC + config.CLIP_READY_DELAY_SEC - (datetime.now() - event_time).total_seconds()
         if delay > 0:
             time.sleep(delay)
         print(f"[CLIP] alert={event_id} capturing 10s evidence")
-        filename = None
+        filename = build_clip_reference(event["channel"], event_time, event_id)
         for attempt in range(1, 4):
             print(f"[CLIP] alert={event_id} capture attempt={attempt}/3")
-            filename = video_clipper.clip_event_video(
+            captured = video_clipper.clip_event_video(
                 channel=event["channel"], event_timestamp=event_time,
-                output_filename=f"clip_ch{event['channel']}_{event_time.strftime('%Y%m%d_%H%M%S')}.mp4",
+                output_filename=filename,
                 event_type=event["event_type"], event_code=event["event_code"],
             )
-            if filename:
+            if captured:
                 break
+            filename = None
             if attempt < 3:
                 time.sleep(5)
         if filename:

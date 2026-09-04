@@ -19,6 +19,7 @@ import requests
 
 import config
 import database
+from clip_storage import resolve_clip_path
 
 
 class AudioAnalysisWorker:
@@ -76,8 +77,8 @@ class AudioAnalysisWorker:
             return
 
         try:
-            saved_clip = Path(str(event.get("clip_filename") or "")).name
-            clip_path = Path(config.CLIPS_DIR) / saved_clip if saved_clip else None
+            saved_clip = str(event.get("clip_filename") or "")
+            clip_path = resolve_clip_path(saved_clip) if saved_clip else None
             if clip_path is None or not clip_path.is_file():
                 self._set_status(event_id, "video_missing", error_message="Không tìm thấy video evidence của cảnh báo.")
                 return

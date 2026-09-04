@@ -66,6 +66,12 @@ CLIP_DURATION_SEC = PRE_BUFFER_SEC + POST_BUFFER_SEC
 CLIP_READY_DELAY_SEC = _current_cfg.get("clip_ready_delay_sec", 2)
 METADATA_RETENTION_DAYS = max(1, int(_current_cfg.get("metadata_retention_days", 3)))
 COSMOS_AUDIO_URL = os.getenv("COSMOS_AUDIO_URL", "http://127.0.0.1:8765/transcribe")
+COSMOS_VIDEO_URL = os.getenv("COSMOS_VIDEO_URL", "http://127.0.0.1:8765/analyze")
+VIDEO_ANALYSIS_SAMPLE_OFFSETS = tuple(
+    float(value.strip())
+    for value in os.getenv("VIDEO_ANALYSIS_SAMPLE_OFFSETS", "1,5,9").split(",")
+    if value.strip()
+)
 AUDIO_ANALYSIS_BACKFILL_LIMIT = max(0, int(os.getenv("AUDIO_ANALYSIS_BACKFILL_LIMIT", "50")))
 # Optional OpenAI-compatible endpoint used only to turn completed audio evidence
 # into an operator-facing suggestion.  Audio transcription does not depend on it.

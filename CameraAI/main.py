@@ -2,23 +2,27 @@ import os
 import json
 import asyncio
 import threading
+import secrets
 from urllib.parse import quote
 from typing import List, Optional
 from datetime import date
 import requests
 from requests.auth import HTTPDigestAuth
 
-from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, Query, BackgroundTasks
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, Query, BackgroundTasks, Depends, HTTPException, status
 from fastapi.responses import HTMLResponse, FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
 
 import config
 import database
 import summary_engine
 import video_clipper
+from clip_storage import resolve_clip_path
 from audio_analysis_worker import AudioAnalysisWorker
+from video_analysis_worker import VideoAnalysisWorker
 from clip_capture_worker import ClipCaptureWorker
 from dahua_client import DahuaNVRListener
 from simulator import NVRDataSimulator
@@ -42,6 +46,30 @@ app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 app.mount("/clips", StaticFiles(directory=str(config.CLIPS_DIR)), name="clips")
 
 templates = Jinja2Templates(directory=str(templates_dir))
+admin_security = HTTPBasic(auto_error=False)
+
+
+def require_database_admin(credentials: Optional[HTTPBasicCredentials] = Depends(admin_security)):
+    """Protect the database viewer with credentials kept outside source code."""
+    expected_user = os.getenv("ADMIN_DATABASE_USERNAME", "")
+    expected_password = os.getenv("ADMIN_DATABASE_PASSWORD", "")
+    if not expected_user or not expected_password:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Trang quản trị DB chưa được bật. Hãy cấu hình ADMIN_DATABASE_USERNAME và ADMIN_DATABASE_PASSWORD.",
+        )
+    is_valid = (
+        credentials is not None
+        and secrets.compare_digest(credentials.username, expected_user)
+        and secrets.compare_digest(credentials.password, expected_password)
+    )
+    if not is_valid:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Cần xác thực quản trị viên.",
+            headers={"WWW-Authenticate": 'Basic realm="Database Administration"'},
+        )
+    return credentials.username
 
 class ConnectionManager:
     def __init__(self):
@@ -67,6 +95,7 @@ manager = ConnectionManager()
 nvr_listener = None
 simulator_thread = None
 audio_analysis_worker = None
+video_analysis_worker = None
 clip_capture_worker = None
 metadata_cleanup_stop = threading.Event()
 metadata_cleanup_thread = None
@@ -86,13 +115,15 @@ def broadcast_event_sync(event_obj: dict):
         print(f"[WebSocket Broadcast Error] {e}")
 
 def restart_listener_service():
-    global nvr_listener, simulator_thread, audio_analysis_worker, clip_capture_worker
+    global nvr_listener, simulator_thread, audio_analysis_worker, video_analysis_worker, clip_capture_worker
     if nvr_listener:
         nvr_listener.stop()
     if simulator_thread:
         simulator_thread.stop()
     if audio_analysis_worker:
         audio_analysis_worker.stop()
+    if video_analysis_worker:
+        video_analysis_worker.stop()
     if clip_capture_worker:
         clip_capture_worker.stop()
 
@@ -100,6 +131,8 @@ def restart_listener_service():
     simulator_thread = None
     audio_analysis_worker = AudioAnalysisWorker(on_updated=broadcast_audio_analysis_update)
     audio_analysis_worker.start()
+    video_analysis_worker = VideoAnalysisWorker(on_updated=broadcast_audio_analysis_update)
+    video_analysis_worker.start()
     clip_capture_worker = ClipCaptureWorker(on_updated=broadcast_audio_analysis_update)
     clip_capture_worker.start()
 
@@ -130,13 +163,15 @@ async def startup_event():
 
 @app.on_event("shutdown")
 async def shutdown_event():
-    global nvr_listener, simulator_thread, audio_analysis_worker, clip_capture_worker, metadata_cleanup_thread, server_event_loop
+    global nvr_listener, simulator_thread, audio_analysis_worker, video_analysis_worker, clip_capture_worker, metadata_cleanup_thread, server_event_loop
     if nvr_listener:
         nvr_listener.stop()
     if simulator_thread:
         simulator_thread.stop()
     if audio_analysis_worker:
         audio_analysis_worker.stop()
+    if video_analysis_worker:
+        video_analysis_worker.stop()
     if clip_capture_worker:
         clip_capture_worker.stop()
     metadata_cleanup_stop.set()
@@ -150,13 +185,14 @@ def broadcast_audio_analysis_update(event_id: int):
     event = database.get_event_by_id(event_id)
     if event:
         event["audio_analysis"] = database.get_audio_analysis(event_id)
+        event["video_analysis"] = database.get_video_analysis(event_id)
         broadcast_event_sync(event)
 
 def purge_expired_metadata() -> None:
     filenames = database.delete_expired_events(config.METADATA_RETENTION_DAYS)
     removed_clips = 0
     for filename in filenames:
-        clip_path = config.CLIPS_DIR / os.path.basename(filename)
+        clip_path = resolve_clip_path(filename)
         try:
             if clip_path.is_file():
                 clip_path.unlink()
@@ -177,6 +213,19 @@ def metadata_cleanup_loop() -> None:
 async def read_index(request: Request):
     return templates.TemplateResponse(request=request, name="index.html")
 
+
+@app.get("/admin/database", response_class=HTMLResponse)
+async def database_admin_page(request: Request, _: str = Depends(require_database_admin)):
+    return templates.TemplateResponse(request=request, name="admin_database.html")
+
+
+@app.get("/api/admin/database")
+async def database_admin_api(
+    limit: int = Query(default=20, ge=1, le=100),
+    _: str = Depends(require_database_admin),
+):
+    return database.get_database_overview(sample_limit=limit)
+
 @app.get("/api/events")
 async def get_events_api(
     event_type: Optional[str] = None,
@@ -192,6 +241,7 @@ async def get_events_api(
     )
     for event in events:
         event["audio_analysis"] = database.get_audio_analysis(event["id"])
+        event["video_analysis"] = database.get_video_analysis(event["id"])
     return {"events": events, "count": len(events)}
 
 @app.get("/api/events/{event_id}")
@@ -200,6 +250,7 @@ async def get_event_detail(event_id: int):
     if not ev:
         return JSONResponse(status_code=404, content={"error": "Event not found"})
     ev["audio_analysis"] = database.get_audio_analysis(event_id)
+    ev["video_analysis"] = database.get_video_analysis(event_id)
     return ev
 
 @app.post("/api/events/{event_id}/audio-analysis")
@@ -215,7 +266,7 @@ async def request_audio_analysis(event_id: int):
         database.update_audio_analysis(event_id, status="video_missing", error_message="Không tìm thấy video evidence của cảnh báo.")
         broadcast_audio_analysis_update(event_id)
         return JSONResponse(status_code=409, content={"error": "Không tìm thấy video evidence của cảnh báo."})
-    clip_path = config.CLIPS_DIR / os.path.basename(str(event["clip_filename"]))
+    clip_path = resolve_clip_path(str(event["clip_filename"]))
     if not clip_path.is_file():
         database.update_audio_analysis(event_id, status="video_missing", error_message="File video evidence không còn trên máy chủ.")
         broadcast_audio_analysis_update(event_id)
@@ -236,6 +287,42 @@ async def request_audio_analysis(event_id: int):
     print(f"[AUDIO] alert={event_id} queued by API")
     audio_analysis_worker.enqueue(event_id)
     return {"queued": True, "audio_analysis": analysis}
+
+
+@app.post("/api/events/{event_id}/video-analysis")
+async def request_video_analysis(event_id: int):
+    """Queue manual visual analysis of representative frames from an event clip."""
+    event = database.get_event_by_id(event_id)
+    if not event:
+        return JSONResponse(status_code=404, content={"error": "Event not found"})
+    if event["event_type"] not in {"audio_anomaly", "video_anomaly"}:
+        return JSONResponse(status_code=400, content={"error": "Chỉ sự kiện bất thường mới có thể phân tích video."})
+    if not event.get("clip_filename"):
+        database.create_video_analysis(event_id, status="video_missing")
+        database.update_video_analysis(event_id, status="video_missing", error_message="Không tìm thấy video evidence của cảnh báo.")
+        broadcast_audio_analysis_update(event_id)
+        return JSONResponse(status_code=409, content={"error": "Không tìm thấy video evidence của cảnh báo."})
+    clip_path = resolve_clip_path(str(event["clip_filename"]))
+    if not clip_path.is_file():
+        database.create_video_analysis(event_id, status="video_missing")
+        database.update_video_analysis(event_id, status="video_missing", error_message="File video evidence không còn trên máy chủ.")
+        broadcast_audio_analysis_update(event_id)
+        return JSONResponse(status_code=409, content={"error": "Không tìm thấy file video evidence."})
+    if video_analysis_worker is None:
+        return JSONResponse(status_code=503, content={"error": "Video worker chưa sẵn sàng."})
+
+    analysis = database.get_video_analysis(event_id)
+    active_statuses = {"processing", "extracting_frames", "analyzing_frames"}
+    if analysis and analysis["status"] in active_statuses | {"completed"}:
+        return {"queued": False, "video_analysis": analysis}
+    if analysis is None:
+        database.create_video_analysis(event_id, status="not_analyzed")
+    database.update_video_analysis(event_id, status="processing", error_message=None)
+    analysis = database.get_video_analysis(event_id)
+    broadcast_audio_analysis_update(event_id)
+    print(f"[VIDEO AI] alert={event_id} queued by API")
+    video_analysis_worker.enqueue(event_id)
+    return {"queued": True, "video_analysis": analysis}
 
 @app.get("/api/summary/daily")
 async def get_daily_summary_api(date_str: Optional[str] = None):

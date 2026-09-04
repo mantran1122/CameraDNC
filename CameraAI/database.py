@@ -6,6 +6,50 @@ from config import STORAGE_DIR
 
 DB_PATH = STORAGE_DIR / "camera_metadata.db"
 
+
+def get_database_overview(sample_limit: int = 20) -> Dict[str, Any]:
+    """Return a read-only, admin-safe view of the SQLite database.
+
+    This deliberately exposes no arbitrary SQL execution endpoint.  Table names
+    are obtained from SQLite itself and quoted before use.
+    """
+    safe_limit = max(1, min(int(sample_limit), 100))
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
+    )
+    table_names = [row["name"] for row in cursor.fetchall()]
+
+    tables = []
+    for table_name in table_names:
+        quoted_name = '"' + table_name.replace('"', '""') + '"'
+        cursor.execute(f"PRAGMA table_info({quoted_name})")
+        columns = [
+            {
+                "name": row["name"],
+                "type": row["type"],
+                "required": bool(row["notnull"]),
+                "primary_key": bool(row["pk"]),
+            }
+            for row in cursor.fetchall()
+        ]
+        cursor.execute(f"SELECT COUNT(*) AS total FROM {quoted_name}")
+        row_count = cursor.fetchone()["total"]
+        cursor.execute(f"SELECT * FROM {quoted_name} ORDER BY rowid DESC LIMIT ?", (safe_limit,))
+        rows = [dict(row) for row in cursor.fetchall()]
+        tables.append({"name": table_name, "row_count": row_count, "columns": columns, "rows": rows})
+
+    conn.close()
+    return {
+        "engine": "SQLite",
+        "database_file": DB_PATH.name,
+        "database_size_bytes": DB_PATH.stat().st_size if DB_PATH.exists() else 0,
+        "generated_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+        "sample_limit": safe_limit,
+        "tables": tables,
+    }
+
 def get_db_connection():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
@@ -61,6 +105,23 @@ def init_db():
         ignored_reason TEXT,
         audio_model TEXT,
         suggestion_json TEXT,
+        error_message TEXT,
+        created_at TEXT NOT NULL,
+        analyzed_at TEXT,
+        FOREIGN KEY(event_id) REFERENCES events(id)
+    );
+    """)
+
+    # Manual, derived video analysis is separate from immutable NVR metadata.
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS video_analyses (
+        event_id INTEGER PRIMARY KEY,
+        status TEXT NOT NULL,
+        summary TEXT,
+        risk_level TEXT,
+        events_json TEXT,
+        frames_json TEXT,
+        video_model TEXT,
         error_message TEXT,
         created_at TEXT NOT NULL,
         analyzed_at TEXT,
@@ -176,6 +237,20 @@ def update_event_clip(event_id: int, clip_filename: str):
     conn.close()
 
 
+def replace_event_clip_reference(event_id: int, old_reference: str, new_reference: str) -> bool:
+    """Atomically change a legacy clip reference after its copied file is verified."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "UPDATE events SET clip_filename = ? WHERE id = ? AND clip_filename = ?",
+        (new_reference, event_id, old_reference),
+    )
+    updated = cursor.rowcount == 1
+    conn.commit()
+    conn.close()
+    return updated
+
+
 def delete_expired_events(retention_days: int) -> List[str]:
     """Delete expired metadata and return the associated clip filenames."""
     cutoff = (datetime.now() - timedelta(days=retention_days)).strftime("%Y-%m-%d %H:%M:%S")
@@ -188,6 +263,7 @@ def delete_expired_events(retention_days: int) -> List[str]:
     if event_ids:
         placeholders = ",".join("?" for _ in event_ids)
         cursor.execute(f"DELETE FROM audio_analyses WHERE event_id IN ({placeholders})", event_ids)
+        cursor.execute(f"DELETE FROM video_analyses WHERE event_id IN ({placeholders})", event_ids)
         cursor.execute(f"DELETE FROM events WHERE id IN ({placeholders})", event_ids)
     conn.commit()
     conn.close()
@@ -288,6 +364,73 @@ def get_unanalyzed_audio_event_ids(limit: int = 50) -> List[int]:
     ids = [row[0] for row in cursor.fetchall()]
     conn.close()
     return ids
+
+
+def create_video_analysis(event_id: int, status: str = "not_analyzed") -> bool:
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        INSERT OR IGNORE INTO video_analyses (event_id, status, created_at)
+        VALUES (?, ?, ?)
+        """,
+        (event_id, status, datetime.now().astimezone().isoformat(timespec="seconds")),
+    )
+    created = cursor.rowcount == 1
+    conn.commit()
+    conn.close()
+    return created
+
+
+def update_video_analysis(event_id: int, **values: Any) -> bool:
+    if "events" in values:
+        values["events_json"] = json.dumps(values.pop("events"), ensure_ascii=False)
+    if "frames" in values:
+        values["frames_json"] = json.dumps(values.pop("frames"), ensure_ascii=False)
+
+    allowed_fields = {
+        "status", "summary", "risk_level", "events_json", "frames_json",
+        "video_model", "error_message", "analyzed_at",
+    }
+    unexpected_fields = set(values) - allowed_fields
+    if unexpected_fields:
+        raise ValueError(f"Unsupported video analysis fields: {sorted(unexpected_fields)}")
+    if not values:
+        return False
+
+    assignments = ", ".join(f"{field} = ?" for field in values)
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        f"UPDATE video_analyses SET {assignments} WHERE event_id = ?",
+        [*values.values(), event_id],
+    )
+    updated = cursor.rowcount == 1
+    conn.commit()
+    conn.close()
+    return updated
+
+
+def get_video_analysis(event_id: int) -> Optional[Dict[str, Any]]:
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM video_analyses WHERE event_id = ?", (event_id,))
+    row = cursor.fetchone()
+    conn.close()
+    if not row:
+        return None
+
+    item = dict(row)
+    for database_key, api_key in (("events_json", "events"), ("frames_json", "frames")):
+        raw_value = item.pop(database_key)
+        if raw_value is None:
+            item[api_key] = []
+            continue
+        try:
+            item[api_key] = json.loads(raw_value)
+        except json.JSONDecodeError:
+            item[api_key] = []
+    return item
 
 # Initialize DB on module import
 init_db()
