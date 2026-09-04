@@ -360,8 +360,12 @@ async def request_audio_analysis(event_id: int):
     return {"queued": True, "audio_analysis": analysis}
 
 
+class VideoAnalysisOptions(BaseModel):
+    max_frames_per_window: Optional[int] = None
+
+
 @app.post("/api/events/{event_id}/video-analysis")
-async def request_video_analysis(event_id: int):
+async def request_video_analysis(event_id: int, options: Optional[VideoAnalysisOptions] = None):
     """Queue manual visual analysis of representative frames from an event clip."""
     event = database.get_event_by_id(event_id)
     if not event:
@@ -383,7 +387,7 @@ async def request_video_analysis(event_id: int):
         return JSONResponse(status_code=503, content={"error": "Video worker chưa sẵn sàng."})
 
     analysis = database.get_video_analysis(event_id)
-    active_statuses = {"processing", "extracting_frames", "analyzing_frames"}
+    active_statuses = {"processing", "extracting_frames", "analyzing_frames", "analyzing_sequences"}
     if analysis and analysis["status"] in active_statuses | {"completed"}:
         return {"queued": False, "video_analysis": analysis}
     if analysis is None:
@@ -391,8 +395,11 @@ async def request_video_analysis(event_id: int):
     database.update_video_analysis(event_id, status="processing", error_message=None)
     analysis = database.get_video_analysis(event_id)
     broadcast_audio_analysis_update(event_id)
-    print(f"[VIDEO AI] alert={event_id} queued by API")
-    video_analysis_worker.enqueue(event_id)
+    max_frames = options.max_frames_per_window if options else None
+    if max_frames is not None and not 4 <= max_frames <= 12:
+        raise HTTPException(status_code=422, detail="Số frame mỗi cửa sổ phải từ 4 đến 12.")
+    print(f"[VIDEO AI] alert={event_id} queued by API frames/window={max_frames or 'default'}")
+    video_analysis_worker.enqueue(event_id, max_frames_per_window=max_frames)
     return {"queued": True, "video_analysis": analysis}
 
 @app.get("/api/summary/daily")

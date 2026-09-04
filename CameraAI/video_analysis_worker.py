@@ -25,7 +25,7 @@ _RISK_ORDER = {"none": 0, "low": 1, "medium": 2, "high": 3}
 class VideoAnalysisWorker:
     def __init__(self, on_updated: Optional[Callable[[int], None]] = None):
         self._on_updated = on_updated
-        self._queue: queue.Queue[Optional[int]] = queue.Queue()
+        self._queue: queue.Queue[Optional[tuple[int, int | None]]] = queue.Queue()
         self._running = threading.Event()
         self._thread: Optional[threading.Thread] = None
 
@@ -43,11 +43,11 @@ class VideoAnalysisWorker:
             self._thread.join(timeout=2)
         self._thread = None
 
-    def enqueue(self, event_id: int) -> None:
+    def enqueue(self, event_id: int, max_frames_per_window: int | None = None) -> None:
         if not self._thread or not self._thread.is_alive():
             self.start()
-        print(f"[VIDEO AI] alert={event_id} analysis requested")
-        self._queue.put(event_id)
+        print(f"[VIDEO AI] alert={event_id} analysis requested frames/window={max_frames_per_window or 'default'}")
+        self._queue.put((event_id, max_frames_per_window))
 
     def _run(self) -> None:
         while self._running.is_set():
@@ -57,8 +57,9 @@ class VideoAnalysisWorker:
                 continue
             if event_id is None:
                 continue
+            event_id, max_frames_per_window = event_id
             try:
-                self._process(event_id)
+                self._process(event_id, max_frames_per_window=max_frames_per_window)
             except Exception as exc:
                 print(f"[VIDEO AI] alert={event_id} failed: {exc}")
                 self._set_status(event_id, "failed", error_message=str(exc))
@@ -68,7 +69,7 @@ class VideoAnalysisWorker:
         if self._on_updated:
             self._on_updated(event_id)
 
-    def _process(self, event_id: int) -> None:
+    def _process(self, event_id: int, max_frames_per_window: int | None = None) -> None:
         event = database.get_event_by_id(event_id)
         if not event:
             return
@@ -79,7 +80,7 @@ class VideoAnalysisWorker:
             return
 
         self._set_status(event_id, "extracting_frames", error_message=None)
-        sequences = self._extract_adaptive_sequences(clip_path)
+        sequences = self._extract_adaptive_sequences(clip_path, max_frames_per_window=max_frames_per_window)
         if not sequences:
             self._set_status(event_id, "failed", error_message="Không đọc được frame nào từ video evidence.")
             return
@@ -125,7 +126,7 @@ class VideoAnalysisWorker:
         )
 
     @staticmethod
-    def _extract_adaptive_sequences(clip_path: Path) -> list[dict]:
+    def _extract_adaptive_sequences(clip_path: Path, max_frames_per_window: int | None = None) -> list[dict]:
         """Split a clip into bounded temporal windows and retain diverse frames.
 
         We keep evenly spaced context frames plus frames with the largest visual
@@ -139,12 +140,14 @@ class VideoAnalysisWorker:
             duration = frame_count / fps if fps > 0 and frame_count > 0 else 0.0
             if duration <= 0:
                 return []
+            frame_limit = config.VIDEO_ANALYSIS_MAX_FRAMES_PER_WINDOW if max_frames_per_window is None else int(max_frames_per_window)
+            frame_limit = min(12, max(4, frame_limit))
             windows = []
             start = 0.0
             while start < duration:
                 end = min(duration, start + config.VIDEO_ANALYSIS_WINDOW_SECONDS)
                 frames = VideoAnalysisWorker._select_window_frames(
-                    capture, start, end, config.VIDEO_ANALYSIS_MAX_FRAMES_PER_WINDOW
+                    capture, start, end, frame_limit
                 )
                 if frames:
                     windows.append({"start_seconds": round(start, 3), "end_seconds": round(end, 3), "frames": frames})
