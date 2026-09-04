@@ -260,7 +260,7 @@ function renderAudioAnalysisAction(ev) {
     button.dataset.eventId = ev?.id || '';
     button.hidden = !isAnomaly;
     button.disabled = !canAnalyse || ['processing', 'extracting_audio', 'transcribing', 'analyzing', 'completed', 'no_audio_track', 'audio_too_quiet', 'no_speech_detected'].includes(status);
-    button.textContent = ['video_missing', 'stt_failed', 'transcribed'].includes(status) ? '↻ Chạy lại LLM' : '🤖 Chạy LLM (STT + tổng hợp)';
+    button.textContent = ['video_missing', 'stt_failed', 'transcribed'].includes(status) ? '↻ Phân tích lại âm thanh' : '🎙 Phân tích âm thanh';
 }
 
 function formatVideoAnalysisStatus(analysis) {
@@ -360,7 +360,7 @@ async function requestAudioAnalysis() {
         startAudioAnalysisPolling(eventId);
     } catch (error) {
         button.disabled = false;
-        button.textContent = '🤖 Chạy LLM (STT + tổng hợp)';
+        button.textContent = '🎙 Phân tích âm thanh';
         setText('clip-audio-error', error.message);
     }
 }
