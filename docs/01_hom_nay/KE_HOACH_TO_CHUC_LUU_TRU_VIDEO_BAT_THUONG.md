@@ -239,6 +239,16 @@ python CameraAI\main.py
 
 SQLite vẫn là nguồn đọc trong giai đoạn này. Mỗi event/clip/audio/video analysis được ghi SQLite trước, sau đó vào hàng đợi `postgres_sync_outbox` để PostgreSQL upsert. Khi PostgreSQL mất kết nối, event không mất; worker retry mỗi 30 giây. Chỉ chuyển PostgreSQL thành nguồn đọc sau khi hàng đợi về 0 và số lượng được đối chiếu qua một thời gian vận hành.
 
+### Report đối chiếu dữ liệu (chỉ đọc)
+
+Khi Data Health có `mismatch` hoặc clip thiếu, tạo report chi tiết trước khi quyết định sửa/xóa bất kỳ dữ liệu nào:
+
+```powershell
+python CameraAI\reconcile_data_stores.py
+```
+
+Report JSON chứa từng `legacy_event_id` chỉ có ở SQLite/PostgreSQL và từng clip reference không mở được từ NAS. Report nằm ở `CameraAI/storage/reconciliation/` và không thay đổi database hay video.
+
 ## 10. Các quyết định cần chốt trước khi code
 
 1. NAS là SMB/NFS hay MinIO/S3-compatible? Dung lượng và đường dẫn/prefix được cấp?
