@@ -14,6 +14,7 @@ import hashlib
 import io
 import json
 import logging
+import math
 import os
 import re
 import signal
@@ -29,7 +30,7 @@ from pathlib import Path
 import uvicorn
 from fastapi import Body, FastAPI, Header, Request
 from fastapi.responses import JSONResponse
-from PIL import Image
+from PIL import Image, ImageDraw
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -508,13 +509,13 @@ def _build_prompt_text(
 ) -> str:
     """Build one prompt for an ordered still image or an ordered frame sequence."""
     prompt = _load_live_prompt(prompt_profile)
-    if len(images) > 1:
+    if sequence_context:
         prompt = prompt.replace(
             "You receive a single camera frame.",
-            "You receive an ordered sequence of camera frames from one short recorded-video window.",
+            "You receive one contact sheet containing an ordered sequence of camera frames from one short recorded-video window.",
         ).replace(
             "This is one still frame. Do not claim movement, entry/exit, duration, intent, or change over time unless temporal evidence is explicitly supplied.",
-            "Compare the ordered frames. You may report a change, movement, fall, physical aggression, entry/exit, or an object left behind only when it is visibly supported by more than one frame. If evidence is unclear, say so rather than guessing.",
+            "Read the contact sheet from left to right, top to bottom. Compare the ordered frames. You may report a change, movement, fall, physical aggression, entry/exit, or an object left behind only when it is visibly supported by more than one frame. If evidence is unclear, say so rather than guessing.",
         )
         prompt += "\n\n" + sequence_context
     messages = [
@@ -629,6 +630,36 @@ def _resize_for_live_inference(image: Image.Image) -> Image.Image:
     resized.thumbnail((max_side, max_side), Image.Resampling.LANCZOS)
     logger.debug("Live frame resized from %s to %s", image.size, resized.size)
     return resized
+
+
+def _make_sequence_contact_sheet(images: list[Image.Image], offsets: list[float]) -> Image.Image:
+    """Combine ordered frames into one labelled image for single-image VLMs.
+
+    Cosmos-Reason2 in the deployed vLLM build accepts one image per request.
+    A compact contact sheet preserves temporal context without violating that
+    model constraint.  Frames remain in chronological reading order.
+    """
+    if not images:
+        raise ValueError("sequence contains no images")
+    columns = max(1, math.ceil(math.sqrt(len(images))))
+    rows = math.ceil(len(images) / columns)
+    max_side = int(_cfg.get("max_image_side", 960))
+    cell_width = max(120, max_side // columns)
+    cell_height = max(90, int(cell_width * 0.62))
+    label_height = 22
+    sheet = Image.new("RGB", (columns * cell_width, rows * (cell_height + label_height)), "black")
+    draw = ImageDraw.Draw(sheet)
+    for index, image in enumerate(images):
+        frame = image.copy()
+        frame.thumbnail((cell_width, cell_height), Image.Resampling.LANCZOS)
+        column, row = index % columns, index // columns
+        x = column * cell_width + (cell_width - frame.width) // 2
+        y = row * (cell_height + label_height) + (cell_height - frame.height) // 2
+        sheet.paste(frame, (x, y))
+        timestamp = offsets[index] if index < len(offsets) else None
+        label = f"#{index + 1}" + (f"  {timestamp:.1f}s" if timestamp is not None else "")
+        draw.text((column * cell_width + 5, row * (cell_height + label_height) + cell_height + 3), label, fill="white")
+    return sheet
 
 
 # ── FastAPI app ────────────────────────────────────────────────────────────────
@@ -827,7 +858,7 @@ def analyze_sequence(
 
     try:
         try:
-            max_frames = min(12, max(2, int(os.getenv("COSMOS_SEQUENCE_MAX_FRAMES", "8"))))
+            max_frames = min(12, max(2, int(os.getenv("COSMOS_SEQUENCE_MAX_FRAMES", "12"))))
             max_bytes = max(1_000_000, int(os.getenv("COSMOS_SEQUENCE_MAX_BYTES", "50000000")))
             if len(body) > max_bytes:
                 raise ValueError("sequence archive exceeds size limit")
@@ -853,13 +884,14 @@ def analyze_sequence(
             pass
         offset_text = ", ".join(f"{value:.3f}s" for value in offsets) if offsets else "không có mốc thời gian chính xác"
         sequence_context = (
-            "Đây là chuỗi {} frame theo đúng thứ tự thời gian, thuộc cửa sổ video {}s–{}s. "
-            "Các frame tương ứng các mốc: {}. Hãy đối chiếu toàn bộ chuỗi trước khi kết luận."
+            "Đây là contact sheet gồm {} frame theo đúng thứ tự thời gian, thuộc cửa sổ video {}s–{}s. "
+            "Mỗi ô có nhãn # và giây tương ứng: {}. Hãy đối chiếu toàn bộ chuỗi trước khi kết luận."
         ).format(len(images), x_cosmos_window_start or "?", x_cosmos_window_end or "?", offset_text)
         active_prompt_profile = _active_live_prompt_profile(x_cosmos_prompt_profile)
+        contact_sheet = _make_sequence_contact_sheet(images, offsets)
         t0 = time.perf_counter()
         try:
-            result_text = _run_inference(images, prompt_profile=active_prompt_profile, sequence_context=sequence_context)
+            result_text = _run_inference([contact_sheet], prompt_profile=active_prompt_profile, sequence_context=sequence_context)
         except Exception as exc:
             logger.error("Sequence inference error: %s", exc)
             return JSONResponse({"status": "error", "detail": str(exc)}, status_code=500)
